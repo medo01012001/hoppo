@@ -2,11 +2,21 @@
 <html lang="ar">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
 <title>Hoppo</title>
 <style>
-  html,body{margin:0;height:100%;background:#000;overflow:hidden}
-  canvas{display:block}
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
+  canvas{display:block;touch-action:none}
+  #fs{position:fixed;left:12px;bottom:66px;width:46px;height:46px;border-radius:50%;border:3px solid #5ff0ff;background:rgba(10,20,40,0.78);color:#fff;font-size:22px;cursor:pointer;z-index:5;display:none;align-items:center;justify-content:center;padding:0;line-height:1;box-shadow:0 2px 8px rgba(0,0,0,0.5)}
+  body.touch #mus,body.touch #fs{width:40px;height:40px;font-size:19px;bottom:auto}
+  body.touch #mus{top:calc(50% - 44px)}
+  body.touch #fs{top:calc(50% + 4px)}
+  @media (orientation:portrait){body.touch #mus{top:12px}body.touch #fs{top:60px}}
+  body.touch.canfs #fs{display:flex}
+  body.full #fs{display:none!important}
   #mus{position:fixed;left:12px;bottom:12px;width:46px;height:46px;border-radius:50%;border:3px solid #ffd23d;background:rgba(10,20,40,0.78);color:#fff;font-size:22px;cursor:pointer;z-index:5;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;user-select:none;box-shadow:0 2px 8px rgba(0,0,0,0.5);transition:transform .1s}
   #mus:hover{background:rgba(40,70,120,0.95);transform:scale(1.08)}
   #mus.off{border-color:#9aa3b5;opacity:.85}
@@ -15,6 +25,7 @@
 <body>
 <canvas id="c"></canvas>
 <button id="mus" tabindex="-1" title="الموسيقى">🔊</button>
+<button id="fs" tabindex="-1" title="الشاشة كاملة">⛶</button>
 <script>
 "use strict";
 // =====================================================================
@@ -23,12 +34,14 @@
 // =====================================================================
 const T = 32, ROWS = 15, VH = ROWS * T;
 const cv = document.getElementById("c"), ctx = cv.getContext("2d");
-let VW = 854, SC = 1, OX = 0, DPR = 1;
+let VW = 854, SC = 1, OX = 0, OY = 0, DPR = 1;
+const MIN_VW = 760;
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
-  SC = innerHeight / VH;
+  SC = Math.min(innerHeight / VH, innerWidth / MIN_VW);
   VW = Math.min(1100, Math.ceil(innerWidth / SC));
   OX = Math.max(0, (innerWidth / SC - VW) / 2);
+  OY = Math.max(0, (innerHeight / SC - VH) / 2);
   cv.width = innerWidth * DPR; cv.height = innerHeight * DPR;
   cv.style.width = innerWidth + "px"; cv.style.height = innerHeight + "px";
 }
@@ -169,10 +182,77 @@ addEventListener("keydown", e => {
 });
 addEventListener("keyup", e => { keys[e.code] = false; });
 const mouse = { x: 0, y: 0, l: false, r: false, wheel: 0, clicked: false, moved: false };
-cv.addEventListener("mousemove", e => { mouse.x = e.clientX / SC - OX; mouse.y = e.clientY / SC; mouse.moved = true; });
-cv.addEventListener("mousedown", e => { audio(); if (e.button === 0) { mouse.l = true; mouse.clicked = true; } if (e.button === 2) mouse.r = true; mouse.x = e.clientX / SC - OX; mouse.y = e.clientY / SC; mouse.moved = true; });
+cv.addEventListener("mousemove", e => { mouse.x = e.clientX / SC - OX; mouse.y = e.clientY / SC - OY; mouse.moved = true; mouse.touch = false; });
+cv.addEventListener("mousedown", e => { audio(); if (e.button === 0) { mouse.l = true; mouse.clicked = true; } if (e.button === 2) mouse.r = true; mouse.x = e.clientX / SC - OX; mouse.y = e.clientY / SC - OY; mouse.moved = true; mouse.touch = false; });
 addEventListener("mouseup", e => { if (e.button === 0) mouse.l = false; if (e.button === 2) mouse.r = false; });
 cv.addEventListener("contextmenu", e => e.preventDefault());
+// touch screens
+const touch = { on: false, left: false, right: false, down: false, jump: false, dash: false, pauseTap: false, ids: {} };
+function touchLayout() {
+  const W = innerWidth, H = innerHeight, R = clamp(Math.min(W, H) * 0.1, 28, 50), pad = Math.max(14, R * 0.35);
+  return { W, H, R, pad, lx: pad + R, rx: pad + R * 3.3, dx: pad + R * 2.15, by: H - pad - R, dy: H - pad - R * 3.1,
+           jx: W - pad - R * 1.25, jy: H - pad - R * 1.25, jr: R * 1.25, sx: W - pad - R * 3.75, sy: H - pad - R * 0.95, sr: R * 0.95,
+           px: W / 2, py: Math.max(24, OY * SC - 28), pr: 20 };
+}
+function touchPlaying() { return state === "play"; }
+function readTouches(list) {
+  const t = touchLayout(); let l = false, r = false, d = false, j = false, s = false;
+  for (const tc of list) {
+    const x = tc.clientX, y = tc.clientY;
+    if (x < t.rx + t.R * 1.5 && y > t.dy - t.R * 1.3) {   // d-pad area: slide between left / right, up for pound
+      if (y < t.by - t.R * 1.2 && Math.abs(x - t.dx) < t.R * 1.4) d = true; else if (x < t.dx) l = true; else r = true;
+    } else if (Math.hypot(x - t.jx, y - t.jy) < t.jr * 1.45) j = true;
+    else if (Math.hypot(x - t.sx, y - t.sy) < t.sr * 1.5) s = true;
+  }
+  touch.left = l; touch.right = r; touch.down = d; touch.jump = j; touch.dash = s;
+}
+function touchToMouse(tc) { mouse.x = tc.clientX / SC - OX; mouse.y = tc.clientY / SC - OY; mouse.moved = true; mouse.touch = true; }
+function onTouch(e) {
+  e.preventDefault(); audio();
+  if (!touch.on) { touch.on = true; document.body.classList.add("touch"); }
+  if (touchPlaying()) {
+    if (e.type === "touchstart") { const t = touchLayout(); for (const tc of e.changedTouches) if (Math.hypot(tc.clientX - t.px, tc.clientY - t.py) < t.pr * 1.8) touch.pauseTap = true; }
+    readTouches(e.touches); mouse.l = false; return;
+  }
+  touch.left = touch.right = touch.down = touch.jump = touch.dash = false;
+  const tc = e.changedTouches[0]; if (!tc) return;
+  if (e.type === "touchstart") { touchToMouse(tc); mouse.l = true; mouse.clicked = true; }
+  else if (e.type === "touchmove") touchToMouse(e.touches[0] || tc);
+  else if (!e.touches.length) mouse.l = false;
+}
+for (const ev of ["touchstart", "touchmove", "touchend", "touchcancel"]) cv.addEventListener(ev, onTouch, { passive: false });
+if (matchMedia("(pointer: coarse)").matches) { touch.on = true; document.body.classList.add("touch"); }
+// full screen + landscape (where the browser allows it)
+const fsBtn = document.getElementById("fs");
+if (document.fullscreenEnabled || document.webkitFullscreenEnabled) document.body.classList.add("canfs");
+fsBtn.addEventListener("click", e => {
+  e.preventDefault(); audio();
+  const el = document.documentElement, go = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (go) Promise.resolve(go.call(el)).then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock("landscape").catch(() => {})).catch(() => {});
+});
+addEventListener("fullscreenchange", () => { document.body.classList.toggle("full", !!document.fullscreenElement); setTimeout(resize, 100); });
+function drawTouchControls() {
+  if (!touch.on) return;
+  const t = touchLayout();
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (t.H > t.W && state !== "loading") {   // portrait: suggest turning the phone
+    ctx.globalAlpha = 0.85 + Math.sin(time * 3) * 0.15;
+    txt("🔄 دور التيليفون بالعرض باش تبان اللعبة كبيرة", t.W / 2, Math.max(24, OY * SC / 2), Math.min(16, t.W / 22), "#ffffff", "center", "800", "rgba(0,0,0,0.6)");
+    ctx.globalAlpha = 1;
+  }
+  if (!touchPlaying()) return;
+  const btn = (x, y, r, label, on, col) => {
+    ctx.globalAlpha = on ? 0.75 : 0.38; ctx.fillStyle = on ? col : "rgba(20,30,50,0.9)"; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+    ctx.globalAlpha = on ? 1 : 0.7; ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.stroke();
+    txt(label, x, y + 1, r * 0.8, "#ffffff", "center", "900", "rgba(0,0,0,0.5)"); ctx.globalAlpha = 1;
+  };
+  btn(t.lx, t.by, t.R, "◀", touch.left, "#5ff0ff");
+  btn(t.rx, t.by, t.R, "▶", touch.right, "#5ff0ff");
+  btn(t.dx, t.dy, t.R * 0.72, "▼", touch.down, "#ff9a3d");
+  btn(t.jx, t.jy, t.jr, "⬆", touch.jump, "#6ee06e");
+  btn(t.sx, t.sy, t.sr, "💨", touch.dash, "#ffd23d");
+  btn(t.px, t.py, t.pr, "⏸", false, "#ffffff");
+}
 cv.addEventListener("wheel", e => { mouse.wheel += Math.sign(e.deltaY); e.preventDefault(); }, { passive: false });
 
 function getPad() { const ps = navigator.getGamepads ? navigator.getGamepads() : []; for (const p of ps) if (p && p.connected) return p; return null; }
@@ -197,6 +277,8 @@ function pollInput(dt) {
     pause: k.Escape || k.KeyP, back: k.Escape || k.Backspace || k.KeyX, restart: k.KeyR, mute: k.KeyM,
     tabL: k.KeyQ || k.PageUp, tabR: k.KeyE || k.PageDown, erase: k.Backspace || k.Delete || k.KeyX, test: k.KeyT,
   };
+  if (touch.on && state === "play") { if (touch.left) c.left = true; if (touch.right) c.right = true; if (touch.down) c.down = true; if (touch.jump) c.jump = true; }
+  if (touch.pauseTap) { c.pause = true; touch.pauseTap = false; }
   const p = getPad();
   if (p) {
     const b = i => p.buttons[i] && (p.buttons[i].pressed || p.buttons[i].value > 0.5);
@@ -238,6 +320,7 @@ function devInput(dev) {
   const k = keys, o = { left: false, right: false, up: false, down: false, jump: false, dash: false };
   if (dev === "any" || dev === "kb1") { if (k.KeyA) o.left = true; if (k.KeyD) o.right = true; if (k.KeyW) { o.up = true; o.jump = true; } if (k.KeyS) o.down = true; if (k.Space) o.jump = true; if (k.ShiftLeft || k.KeyF) o.dash = true; }
   if (dev === "any" || dev === "kb2") { if (k.ArrowLeft) o.left = true; if (k.ArrowRight) o.right = true; if (k.ArrowUp) { o.up = true; o.jump = true; } if (k.ArrowDown) o.down = true; if (k.Enter || k.Numpad0) o.jump = true; if (k.ShiftRight || k.Slash || k.Numpad1 || k.ControlRight) o.dash = true; }
+  if ((dev === "any" || dev === "kb1") && touch.on) { if (touch.left) o.left = true; if (touch.right) o.right = true; if (touch.down) o.down = true; if (touch.jump) o.jump = true; if (touch.dash) o.dash = true; }
   if (dev === "any") { if (k.KeyZ || k.KeyK) o.jump = true; if (k.KeyX || k.KeyC || k.KeyJ) o.dash = true; const ps = navigator.getGamepads ? navigator.getGamepads() : []; for (const p of ps) if (p && p.connected) readPad(p, o); }
   if (dev.startsWith("pad")) { const p = padByIndex(+dev.slice(3)); if (p) readPad(p, o); }
   return o;
@@ -1935,17 +2018,19 @@ function drawLevelScene() {
 // ---------------- mouse buttons for menus ----------------
 // each frame the drawing code registers its buttons; the next step uses them for hover + click
 let ui = [], uiLast = [];
-function uiBtn(x, y, w, h, hover, act) { ui.push({ x, y, w, h, hover, act }); }
+function uiBtn(x, y, w, h, hover, act, sel) { ui.push({ x, y, w, h, hover, act, sel }); }
 function uiHit(b) { return mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h; }
 function uiMouse() {
   let over = null;
   for (let i = uiLast.length - 1; i >= 0; i--) if (uiHit(uiLast[i])) { over = uiLast[i]; break; }
   cv.style.cursor = over ? "pointer" : "default";
   if (!over) return;
-  if (mouse.moved && over.hover) over.hover();
+  const wasSel = over.sel ? over.sel() : true;
+  if (mouse.moved && over.hover && !mouse.touch) over.hover();
   if (mouse.clicked) {
     mouse.clicked = false;
     if (over.hover) over.hover();
+    if (mouse.touch && !wasSel) return;   // on a phone: first tap = choose / try on, second tap = confirm
     if (over.act === "confirm" || over.act === "back") pressed[over.act] = true;
     else if (over.act) over.act();
   }
@@ -2238,7 +2323,7 @@ function drawMap() {
   for (let k = 0; k < WPL; k++) {
     const i = w * WPL + k, n = nodes[k], un = isUnlocked(i) || raceOpen(i), on = i === sel, done = !!save.done[i];
     const R = k === 6 ? 30 : k === 7 ? 26 : 22, raceNo = gameMode === "race" && k === 6;
-    if (mapOk(i)) uiBtn(n.x - R, n.y - R, R * 2, R * 2, () => { if (sel !== i) { sel = i; SFX.select(); } }, "confirm");
+    if (mapOk(i)) uiBtn(n.x - R, n.y - R, R * 2, R * 2, () => { if (sel !== i) { sel = i; SFX.select(); } }, "confirm", () => sel === i);
     if (k === 7 && !un) {
       ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.beginPath(); ctx.arc(n.x, n.y, R, 0, 7); ctx.fill();
       txt("?", n.x, n.y + 1, 24, "#ffd23d", "center", "900");
@@ -2313,7 +2398,7 @@ function drawShop() {
       if (on) { ctx.strokeStyle = "#ffd23d"; ctx.lineWidth = 3; rrect(x + 1, y - 2, cw - 2, 86, 13); ctx.stroke(); }
       else if (it[2] >= 1000) { ctx.strokeStyle = `rgba(255,210,60,${0.55 + Math.sin(time * 4 + c) * 0.35})`; ctx.lineWidth = 2; rrect(x + 3, y, cw - 6, 82, 12); ctx.stroke(); txt("💎", x + 14, y + 11, 11, "#fff", "center"); }
       const cx = x + cw / 2;
-      uiBtn(x + 3, y, cw - 6, 82, () => { if (shopRow !== r || shopCol[r] !== c) { shopRow = r; shopCol[r] = c; SFX.select(); } }, "confirm");
+      uiBtn(x + 3, y, cw - 6, 82, () => { if (shopRow !== r || shopCol[r] !== c) { shopRow = r; shopCol[r] = c; SFX.select(); } }, "confirm", () => shopRow === r && shopCol[r] === c);
       if (r === 0) { mascot(cx, y + 30, PCOL[0], 0.42, 1); drawHat(it[0], cx, y + 30, 0.84); }
       else if (r === 1) { mascot(cx, y + 26, PCOL[0], 0.42, 0); drawGlasses(it[0], cx, y + 26 + 8.4, 0.8); }
       else mascot(cx, y + 24, outfitCol(PCOL[0], it[0]), 0.42, 1);
@@ -2440,7 +2525,13 @@ function drawEditor() {
   // top bar
   ctx.fillStyle = "rgba(0,0,0,0.5)"; rrect(8, 6, VW - 16, 34, 12); ctx.fill();
   txt("🛠️ صانع المراحل  •  " + ED_TOOLS[ed.tool][1], VW - 20, 23, 16, "#ffffff", "right", "900");
-  txt("A/Space حط • B/X مسح • Q E (LB RB) بدل • T جرب • Esc/Start القائمة • 🖱 كليك يمين = مسح", 20, 23, 12, "#ffe68a", "left", "700");
+  txt("A/Space حط • B/X مسح • Q E (LB RB) بدل • T جرب • Esc/Start القائمة • 🖱 كليك يمين = مسح", 116, 23, 12, "#ffe68a", "left", "700");
+  if (!ed.menu) {
+    const mb = { x: 12, y: 8, w: 96, h: 30 }, h = uiHit(mb);
+    ctx.fillStyle = h ? "#ffffff" : "rgba(255,210,60,0.9)"; rrect(mb.x, mb.y, mb.w, mb.h, 10); ctx.fill();
+    txt("☰ القائمة", mb.x + mb.w / 2, mb.y + 16, 14, "#0b3a52", "center", "900");
+    uiBtn(mb.x, mb.y, mb.w, mb.h, null, () => { ed.menu = true; ed.menuSel = 0; ed.confirmClear = false; ed.lock = true; SFX.select(); });
+  }
   // palette
   const per = Math.ceil(ED_TOOLS.length / 2), pw = Math.min(54, (VW - 76) / per), px0 = 60 + (VW - 60) / 2 - per * pw / 2, py0 = VH - ED_PAL_H, rh = ED_PAL_H / 2;
   ctx.fillStyle = "rgba(10,15,30,0.85)"; ctx.fillRect(0, py0, VW, ED_PAL_H);
@@ -2575,6 +2666,7 @@ function frame(now) {
 }
 function step_(dt) {
   time += dt;
+  if (state !== "play" && (touch.left || touch.right || touch.jump || touch.dash || touch.down)) touch.left = touch.right = touch.down = touch.jump = touch.dash = false;
   pollInput(dt);
   const edges = devEdges();
   if (pressed.mute && state !== "editor") setMusic(!musicOn);
@@ -2677,7 +2769,7 @@ function afterJoin() {
 }
 function render(dt = 1 / 60) {
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = "#000"; ctx.fillRect(0, 0, cv.width, cv.height);
-  ctx.setTransform(SC * DPR, 0, 0, SC * DPR, OX * SC * DPR, 0);
+  ctx.setTransform(SC * DPR, 0, 0, SC * DPR, OX * SC * DPR, OY * SC * DPR);
   ui = [];
   ctx.save(); ctx.beginPath(); ctx.rect(0, 0, VW, VH); ctx.clip();
   if (state === "loading") drawLoading();
@@ -2702,6 +2794,7 @@ function render(dt = 1 / 60) {
   drawToasts(dt);
   ctx.restore();
   uiLast = ui;
+  drawTouchControls();
 }
 requestAnimationFrame(frame);
 </script>
