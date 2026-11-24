@@ -1234,8 +1234,10 @@ function endlessOver() {
 
 // ---------------- race mode ----------------
 let raceSel = 0;
-function nextRaceLevel(i) {   // next unlocked level that is not a boss fight (wraps around)
-  for (let k = 1; k <= LEVELS; k++) { const j = (i + k) % LEVELS; if (isUnlocked(j) && !isBossLvl(j)) return j; }
+// race: levels open as you race through them (no need to finish them in the adventure first)
+const raceOpen = i => gameMode === "race" && !isSecretLvl(i) && !isBossLvl(i) && i >= 0 && i <= (save.raceMax || 0);
+function nextRaceLevel(i) {   // the next level that is not a boss fight (and not a locked secret), wraps around
+  for (let k = 1; k <= LEVELS; k++) { const j = (i + k) % LEVELS; if (!isBossLvl(j) && (!isSecretLvl(j) || isUnlocked(j))) return j; }
   return i;
 }
 function raceFinish(p) {
@@ -1309,7 +1311,7 @@ function mapNodes(w) {
   pts.push({ x: pts[6].x - sp * 0.55, y: 132 });
   return pts;
 }
-const mapOk = i => isUnlocked(i) && !(gameMode === "race" && isBossLvl(i));
+const mapOk = i => (isUnlocked(i) || raceOpen(i)) && !(gameMode === "race" && isBossLvl(i));
 function mapInit() {
   if (!mapOk(sel)) { sel = 0; for (let i = LEVELS - 1; i >= 0; i--) if (mapOk(i) && !save.done[i] && !isSecretLvl(i)) { sel = i; break; } }
   mapW = Math.floor(sel / WPL); const n = mapNodes(mapW)[sel % WPL]; mapPos = { x: n.x, y: n.y }; playSong(0);
@@ -2035,7 +2037,7 @@ function saveChoose() {
   SFX.ok();
   if (saveSel === 0) { state = "count"; return; }
   if (!saveConfirm) { saveConfirm = true; return; }
-  if (gameMode === "race") save.raceBoard = { races: 0, wins: [0, 0, 0, 0], pts: [0, 0, 0, 0] };
+  if (gameMode === "race") { save.raceBoard = { races: 0, wins: [0, 0, 0, 0], pts: [0, 0, 0, 0] }; save.raceMax = 0; }
   else { save.done = {}; save.stars = {}; save.best = {}; sel = 0; }
   writeSave(); saveConfirm = false; state = "count";
 }
@@ -2090,14 +2092,14 @@ function drawRaceEnd() {
   txt("⏱ " + fmtTime(r.time), VW / 2, 94, 18, "#ffffff", "center", "800");
   // overall standings: 3 / 2 / 1 points per race, sorted by score
   const rb = save.raceBoard, rank = raceRank(), chw = Math.min(160, (VW - 40) / rank.length);
-  txt("📊 الترتيب العام  •  " + rb.races + " سباق", VW / 2, 124, 16, "#ffe68a", "center", "900", "rgba(0,0,0,0.6)");
+  txt("📊 الترتيب العام  •  " + rb.races + " سباق  •  النقط: الأول 3⭐ التاني 2⭐ التالت 1⭐", VW / 2, 124, 15, "#ffe68a", "center", "900", "rgba(0,0,0,0.6)");
   rank.forEach((id, i) => {
     const x = VW / 2 + ((rank.length - 1) / 2 - i) * chw, y = 162, C = outfitCol(PCOL[id], getOutfit(id).color), top = i === 0;
     ctx.fillStyle = top ? "rgba(255,214,70,0.95)" : "rgba(255,255,255,0.16)"; rrect(x - chw / 2 + 5, y - 22, chw - 10, 44, 12); ctx.fill();
     ctx.fillStyle = C.body; rrect(x - chw / 2 + 11, y - 14, 8, 28, 4); ctx.fill();
     const tc = top ? "#3a2a00" : "#ffffff";
     txt(MEDAL[i] + " " + raceLabel(id), x + 6, y - 9, 14, tc, "center", "900");
-    txt("⭐ " + rb.pts[id] + "   🏆 " + rb.wins[id], x + 6, y + 11, 13, tc, "center", "800");
+    txt("⭐ " + rb.pts[id] + " نقطة  •  🏆 " + rb.wins[id] + " ربح", x + 6, y + 11, 12, tc, "center", "800");
   });
   const n = r.order.length, cw = Math.min(170, (VW - 40) / n), podium = [110, 82, 60, 44], base = 404;
   r.order.forEach((p, i) => {
@@ -2218,7 +2220,7 @@ function drawMap() {
   if (w < WORLDS - 1) { const e = nodes[6]; ctx.strokeStyle = save.done[w * WPL + 6] ? "#fff" : "rgba(255,255,255,0.3)"; ctx.setLineDash([10, 10]); ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(VW + 10, e.y + 30); ctx.stroke(); ctx.setLineDash([]); }
   // nodes
   for (let k = 0; k < WPL; k++) {
-    const i = w * WPL + k, n = nodes[k], un = isUnlocked(i), on = i === sel, done = !!save.done[i];
+    const i = w * WPL + k, n = nodes[k], un = isUnlocked(i) || raceOpen(i), on = i === sel, done = !!save.done[i];
     const R = k === 6 ? 30 : k === 7 ? 26 : 22, raceNo = gameMode === "race" && k === 6;
     if (mapOk(i)) uiBtn(n.x - R, n.y - R, R * 2, R * 2, () => { if (sel !== i) { sel = i; SFX.select(); } }, "confirm");
     if (k === 7 && !un) {
@@ -2613,7 +2615,7 @@ function step_(dt) {
       raceSel = rowNav(raceSel, 3);
       if (pressed.confirm || pressed.jump) {
         SFX.ok();
-        if (raceSel === 0) startLevel(nextRaceLevel(L.i));
+        if (raceSel === 0) { const j = nextRaceLevel(L.i); save.raceMax = Math.max(save.raceMax || 0, j); writeSave(); startLevel(j); }
         else if (raceSel === 1) startLevel(L.i);
         else { state = "map"; mapInit(); }
       } else if (pressed.back) { state = "map"; mapInit(); }
