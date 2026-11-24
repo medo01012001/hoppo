@@ -7,10 +7,14 @@
 <style>
   html,body{margin:0;height:100%;background:#000;overflow:hidden}
   canvas{display:block}
+  #mus{position:fixed;left:12px;bottom:12px;width:46px;height:46px;border-radius:50%;border:3px solid #ffd23d;background:rgba(10,20,40,0.78);color:#fff;font-size:22px;cursor:pointer;z-index:5;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;user-select:none;box-shadow:0 2px 8px rgba(0,0,0,0.5);transition:transform .1s}
+  #mus:hover{background:rgba(40,70,120,0.95);transform:scale(1.08)}
+  #mus.off{border-color:#9aa3b5;opacity:.85}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<button id="mus" tabindex="-1" title="الموسيقى">🔊</button>
 <script>
 "use strict";
 // =====================================================================
@@ -40,7 +44,7 @@ const SECRET_GEMS = 12;
 const isBossLvl = i => i >= 0 && i % WPL === 6, isSecretLvl = i => i >= 0 && i % WPL === 7;
 function defaultSave() {
   return { v: 2, done: {}, stars: {}, best: {}, coins: 0, owned: { none: 1, gnone: 1, cdef: 1 }, hat: "none", glasses: "gnone", color: "cdef",
-           ach: {}, stats: { stomps: 0, bricks: 0, coins: 0 }, endlessBest: 0 };
+           ach: {}, stats: { stomps: 0, bricks: 0, coins: 0 }, endlessBest: 0, outfits: {}, raceBoard: { races: 0, wins: [0, 0, 0, 0], pts: [0, 0, 0, 0] } };
 }
 let save = defaultSave();
 try {
@@ -56,7 +60,8 @@ try {
     }
   }
 } catch (e) {}
-{ const d = defaultSave(); for (const k of ["done", "stars", "best", "owned", "ach", "stats"]) if (!save[k] || typeof save[k] !== "object") save[k] = d[k]; }
+{ const d = defaultSave(); for (const k of ["done", "stars", "best", "owned", "ach", "stats", "outfits"]) if (!save[k] || typeof save[k] !== "object") save[k] = d[k];
+  if (!save.raceBoard || !Array.isArray(save.raceBoard.pts) || !Array.isArray(save.raceBoard.wins)) save.raceBoard = d.raceBoard; }
 function writeSave() { try { localStorage.setItem("hoppoSave2", JSON.stringify(save)); } catch (e) {} }
 function worldGems(w) { let n = 0; for (let k = 0; k < 6; k++) n += save.stars[w * WPL + k] || 0; return n; }
 function isUnlocked(i) {
@@ -76,6 +81,14 @@ function lvlName(i) {
 // ---------------- audio ----------------
 let AC = null, musicOn = true;
 try { musicOn = localStorage.getItem("hoppoMusic") !== "0"; } catch (e) {}
+const musBtn = document.getElementById("mus");
+function setMusic(on) {
+  musicOn = on; try { localStorage.setItem("hoppoMusic", on ? "1" : "0"); } catch (e) {}
+  musBtn.textContent = on ? "🔊" : "🔇"; musBtn.classList.toggle("off", !on); musBtn.title = on ? "طفي الموسيقى" : "شعل الموسيقى";
+}
+musBtn.addEventListener("mousedown", e => e.preventDefault());
+musBtn.addEventListener("click", e => { e.preventDefault(); audio(); setMusic(!musicOn); });
+setMusic(musicOn);
 function audio() {
   if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
   if (AC.state === "suspended") AC.resume();
@@ -231,11 +244,16 @@ function devInput(dev) {
 }
 // which devices pressed "jump" this frame (for joining)
 const devPrev = {};
+function devJoinBtn(d) {
+  if (d === "kb1") return !!keys.Space;
+  if (d === "kb2") return !!(keys.Enter || keys.Numpad0);
+  const p = padByIndex(+d.slice(3)); return !!(p && p.buttons[0] && p.buttons[0].pressed);
+}
 function devEdges() {
   const list = ["kb1", "kb2"], ps = navigator.getGamepads ? navigator.getGamepads() : [];
   for (const p of ps) if (p && p.connected) list.push("pad" + p.index);
   const out = [];
-  for (const d of list) { const j = devInput(d).jump; if (j && !devPrev[d]) out.push(d); devPrev[d] = j; }
+  for (const d of list) { const j = devJoinBtn(d); if (j && !devPrev[d]) out.push(d); devPrev[d] = j; }
   return out;
 }
 function devName(d) {
@@ -454,39 +472,70 @@ const PCOL = [
 
 // ---------------- shop items ----------------
 const HATS = [["none", "بلا", 0], ["cap", "كاسكيطة", 40], ["party", "قبعة الحفلة", 60], ["bow", "فيونكة", 60], ["chef", "قبعة الشاف", 80],
-              ["top", "طربوش طويل", 100], ["viking", "خوذة الفايكينغ", 120], ["crown", "تاج الملك", 150]];
-const GLASSES = [["gnone", "بلا", 0], ["round", "نظاظر مدورين", 40], ["sun", "نظاظر الشمس", 50], ["star", "نظاظر النجوم", 90]];
+              ["top", "طربوش طويل", 100], ["viking", "خوذة الفايكينغ", 120], ["crown", "تاج الملك", 150], ["halo", "هالة الملاك", -1]];
+const GLASSES = [["gnone", "بلا", 0], ["round", "نظاظر مدورين", 40], ["sun", "نظاظر الشمس", 50], ["star", "نظاظر النجوم", 90], ["mask", "قناع النينجا", -1]];
 const COLORS = [["cdef", "الأصلي", 0, null], ["cred", "حمر", 30, { body: "#ff5a5a", dark: "#5a1010", hi: "#ffc0c0" }],
                 ["cpur", "موڤ", 30, { body: "#b07cff", dark: "#33176a", hi: "#e2d0ff" }], ["corg", "ليموني", 30, { body: "#ff9a3d", dark: "#5a2e00", hi: "#ffd9b0" }],
                 ["cwht", "بيض", 50, { body: "#f4f7ff", dark: "#4a5470", hi: "#ffffff" }], ["cblk", "كحل", 50, { body: "#3a3f52", dark: "#0c0e16", hi: "#7a819c" }],
-                ["cgold", "ذهبي", 120, { body: "#ffcf3a", dark: "#6a4a00", hi: "#fff3b0" }], ["crain", "قوس قزح", 200, "rainbow"]];
+                ["cgold", "ذهبي", 120, { body: "#ffcf3a", dark: "#6a4a00", hi: "#fff3b0" }], ["crain", "قوس قزح", 200, "rainbow"], ["cgal", "المجرة", -1, "galaxy"]];
 const SHOP = [HATS, GLASSES, COLORS], SHOP_KEY = ["hat", "glasses", "color"], SHOP_TITLE = ["🎩 القبعات", "😎 النظاظر", "🎨 الألوان"];
 function outfitCol(base, colorId = save.color) {
   const c = COLORS.find(c => c[0] === colorId);
   if (!c || !c[3]) return base;
   if (c[3] === "rainbow") { const h = (time * 90) % 360; return { body: `hsl(${h},90%,62%)`, dark: `hsl(${h},70%,22%)`, hi: `hsl(${h},100%,85%)` }; }
+  if (c[3] === "galaxy") { const h = 250 + Math.sin(time * 1.5) * 40; return { body: `hsl(${h},75%,52%)`, dark: `hsl(${h + 20},80%,16%)`, hi: `hsl(${h - 60},100%,82%)` }; }
   return c[3];
 }
-const pcol = p => p.id === 0 ? outfitCol(p.col) : p.col;
+const pcol = p => outfitCol(p.col, getOutfit(p.id).color);
 
 // ---------------- achievements ----------------
+// [id, icon, name, description, reward coins, reward item (only from achievements)]
 const ACH = [
-  ["first", "🌱", "أول خطوة", "كمل أول مرحلة"], ["nodeath", "😇", "بلا غلطة", "كمل مرحلة بلا ما تموت"], ["fast", "⚡", "الصاروخ", "كمل مرحلة فأقل من 30 ثانية"],
-  ["stomp10", "👟", "الصياد", "طرطق 10 ديال الأعداء"], ["stomp100", "🥊", "المحارب", "طرطق 100 ديال الأعداء"], ["coins500", "💰", "الغني", "جمع 500 كوان"],
-  ["bricks", "🧱", "الهراس", "هرس 25 بريكة"], ["gems", "💎", "جامع الجواهر", "جمع جميع جواهر شي عالم"], ["boss1", "👹", "قاهر السلايم", "غلب أول بوس"],
-  ["bossall", "👑", "بطل العوالم", "غلب البوسات الخمسة"], ["secret", "🔓", "المستكشف", "كمل شي مرحلة سرية"], ["race", "🏁", "السريع", "ربح شي سباق"],
-  ["endless", "♾️", "ما كيحبسش", "وصل 500 متر فبلا نهاية"], ["shop", "🛒", "الأناقة", "شري شي حاجة من الحانوت"], ["team", "🤝", "الفريق", "كمل مرحلة ب4 لاعبين"],
-  ["maker", "🛠️", "المهندس", "كمل مرحلة صاوبتيها بيدك"],
+  ["first", "🌱", "أول خطوة", "كمل أول مرحلة", 20], ["nodeath", "😇", "بلا غلطة", "كمل مرحلة بلا ما تموت", 30],
+  ["fast", "⚡", "الصاروخ", "كمل مرحلة فأقل من 30 ثانية", 40], ["perfect", "🌟", "مثالي", "جمع 3 جواهر فمرحلة وحدة", 30],
+  ["coinsAll", "🪙", "ما خلا والو", "جمع جميع الكوانات فمرحلة", 50], ["levels10", "📗", "المسافر", "كمل 10 مراحل", 60],
+  ["levels30", "📚", "الرحالة", "كمل 30 مرحلة", 150], ["stomp10", "👟", "الصياد", "طرطق 10 ديال الأعداء", 20],
+  ["stomp100", "🥊", "المحارب", "طرطق 100 ديال الأعداء", 80], ["stomp500", "🦸", "البطل الخارق", "طرطق 500 ديال الأعداء", 200],
+  ["bricks", "🧱", "الهراس", "هرس 25 بريكة", 30], ["bricks100", "🏗️", "الهدام", "هرس 100 بريكة", 80],
+  ["jump100", "🦘", "النقاز", "نقز 100 مرة", 20], ["jump1000", "🐸", "الضفدع", "نقز 1000 مرة", 80],
+  ["walls", "🧗", "المتسلق", "نقز على الحيط 50 مرة", 40], ["dashes", "💨", "البرق", "دير الداش 100 مرة", 40],
+  ["pounds", "🔨", "المطرقة", "دير 50 ضربة للتحت", 40], ["springs", "🌀", "الطيار", "نقز على 30 سوسطة", 30],
+  ["keys", "🔑", "مول السوارت", "جمع 10 سوارت", 40], ["gates", "🚪", "فاتح البيبان", "حل 10 بوابات", 40],
+  ["stars", "⭐", "النجم", "خود 10 نجمات", 40], ["magnets", "🧲", "المغناطيس", "خود 10 مغناطيس", 30],
+  ["coins500", "💰", "الغني", "جمع 500 كوان", 50], ["coins2000", "🏦", "البنكة", "جمع 2000 كوان", 150],
+  ["rich", "💸", "المليونير", "يكون عندك 1000 كوان", 100], ["gems", "💎", "جامع الجواهر", "جمع جواهر عالم كامل", 60],
+  ["gems30", "💠", "الكنز", "جمع 30 جوهرة", 60], ["gems90", "🌌", "سيد الجواهر", "جمع 90 جوهرة كاملين", 300, "cgal"],
+  ["boss1", "👹", "قاهر السلايم", "غلب بوس العالم 1", 50], ["boss2", "🌵", "قاهر الصبار", "غلب بوس العالم 2", 60],
+  ["boss3", "❄️", "قاهر اليتي", "غلب بوس العالم 3", 70], ["boss4", "🦇", "قاهر الخفاش", "غلب بوس العالم 4", 80],
+  ["boss5", "🐉", "قاهر التنين", "غلب بوس العالم 5", 100], ["bossclean", "🛡️", "بلا خدش", "غلب بوس بلا ما تموت", 80],
+  ["bossall", "👑", "بطل العوالم", "غلب البوسات الخمسة", 300, "halo"], ["secret", "🔓", "المستكشف", "كمل شي مرحلة سرية", 80],
+  ["secret5", "🗝️", "سيد الأسرار", "كمل المراحل السرية الخمسة", 250, "mask"], ["race", "🏁", "السريع", "ربح شي سباق", 30],
+  ["race10", "🏎️", "بطل السباق", "ربح 10 سباقات", 120], ["endless100", "🏃", "العداء", "وصل 100 متر فبلا نهاية", 20],
+  ["endless", "♾️", "ما كيحبسش", "وصل 500 متر فبلا نهاية", 80], ["endless1000", "🚀", "ما كيتعياش", "وصل 1000 متر فبلا نهاية", 200],
+  ["shop", "🛒", "الأناقة", "شري شي حاجة من الحانوت", 20], ["shop5", "🛍️", "مول الموضة", "شري 5 حوايج", 60],
+  ["hats", "🎩", "مول القبعات", "شري جميع القبعات", 150], ["duo", "👯", "صحاب", "كمل مرحلة مع صاحبك", 30],
+  ["team", "🤝", "الفريق", "كمل مرحلة ب4 لاعبين", 50], ["revive", "🫧", "المنقذ", "رجع صحابك من الفقاعة 10 مرات", 40],
+  ["maker", "🛠️", "المهندس", "كمل مرحلة صاوبتيها بيدك", 40], ["deaths", "🌵", "الصبار", "مت 50 مرة وما عيتيش", 30],
+  ["play30", "⏰", "المدمن", "لعب 30 دقيقة", 100], ["all", "🏅", "الأسطورة", "جمع جميع الإنجازات", 500],
 ];
+// stat counters that unlock achievements when they reach a number
+const STAT_ACH = [["stomps", 10, "stomp10"], ["stomps", 100, "stomp100"], ["stomps", 500, "stomp500"], ["bricks", 25, "bricks"], ["bricks", 100, "bricks100"],
+  ["coins", 500, "coins500"], ["coins", 2000, "coins2000"], ["jumps", 100, "jump100"], ["jumps", 1000, "jump1000"], ["walls", 50, "walls"],
+  ["dashes", 100, "dashes"], ["pounds", 50, "pounds"], ["springs", 30, "springs"], ["keys", 10, "keys"], ["stars", 10, "stars"], ["magnets", 10, "magnets"],
+  ["gates", 10, "gates"], ["raceWins", 10, "race10"], ["buys", 5, "shop5"], ["revives", 10, "revive"], ["deaths", 50, "deaths"], ["playT", 1800, "play30"]];
+function stat(n, v = 1) {
+  const s = save.stats, val = s[n] = (s[n] || 0) + v;
+  for (const a of STAT_ACH) if (a[0] === n && val >= a[1] && !save.ach[a[2]]) unlock(a[2]);
+}
+function itemName(id) { for (const g of SHOP) { const it = g.find(it => it[0] === id); if (it) return it[1]; } return id; }
 function unlock(id) {
   if (save.ach[id]) return;
-  save.ach[id] = 1; writeSave(); SFX.ach();
-  const a = ACH.find(a => a[0] === id); if (a) toasts.push({ a, t: 3.5 });
+  const a = ACH.find(a => a[0] === id); if (!a) return;
+  save.ach[id] = 1; save.coins += a[4] || 0; if (a[5]) save.owned[a[5]] = 1;   // reward
+  writeSave(); SFX.ach(); toasts.push({ a, t: 3.5 });
+  if (ACH.every(b => b[0] === "all" || save.ach[b[0]])) unlock("all");
 }
-function addStomp() {
-  save.stats.stomps = (save.stats.stomps || 0) + 1;
-  if (save.stats.stomps >= 10) unlock("stomp10"); if (save.stats.stomps >= 100) unlock("stomp100");
-}
+function addStomp() { stat("stomps"); }
 
 // ---------------- players ----------------
 function makePlayer(id, dev) {
@@ -531,7 +580,7 @@ function breakBrick(c, r) {
   if (L.grid[r][c] !== "X") return;
   L.grid[r][c] = " "; SFX.brick(); shake = Math.max(shake, 4);
   for (let k = 0; k < 8; k++) particles.push({ x: c * T + 16, y: r * T + 16, vx: (Math.random() - 0.5) * 320, vy: -Math.random() * 380, life: 0.9, max: 0.9, color: k % 2 ? "#c0553a" : "#e8875e", size: 6, g: 1400 });
-  save.stats.bricks = (save.stats.bricks || 0) + 1; if (save.stats.bricks >= 25) unlock("bricks");
+  stat("bricks");
 }
 function moveX(e, dx) {
   e.x += dx;
@@ -584,7 +633,7 @@ function dust(x, y, n = 6) { for (let i = 0; i < n; i++) particles.push({ x: x +
 
 function kill(p) {
   if (p.dead > 0 || p.bubble) return;
-  p.dead = 0.9; deaths++; shake = 10; SFX.die(); if (!p.cpu) rumble(0.8, 0.8, 300);
+  p.dead = 0.9; deaths++; if (!p.cpu) stat("deaths"); shake = 10; SFX.die(); if (!p.cpu) rumble(0.8, 0.8, 300);
   p.star = 0; p.magnet = 0; p.pound = 0; p.dashT = 0;
   burst(p.x + p.w / 2, p.y + p.h / 2, pcol(p).body, 26, 260);
   burst(p.x + p.w / 2, p.y + p.h / 2, "#ffffff", 10, 200);
@@ -695,6 +744,7 @@ function updatePlayer(p, inp, dt) {
       for (const q of players) if (q !== p && alive(q) && overlap({ x: p.x - 6, y: p.y - 6, w: p.w + 12, h: p.h + 12 }, q)) {
         p.bubble = false; p.vy = -380; p.blink = 1.2; p.noCut = true; p.canDouble = true; p.canDash = true;
         SFX.ok(); burst(p.x + p.w / 2, p.y + p.h / 2, "#bff4ff", 18, 180, 0); floats.push({ x: p.x + 10, y: p.y - 10, t: "🫧 رجع!", life: 1 });
+        if (!q.cpu) stat("revives");
         break;
       }
     }
@@ -718,7 +768,7 @@ function updatePlayer(p, inp, dt) {
   const dashPressed = !!inp.dash && !p.prevDash; p.prevDash = !!inp.dash;
   if (p.dashCd > 0) p.dashCd -= dt;
   if (dashPressed && p.canDash && p.dashCd <= 0 && !p.pound) {
-    p.dashT = 0.16; p.canDash = false; p.dashCd = 0.35; p.vx = p.face * 620; p.vy = 0; p.ride = null; p.rideP = null; SFX.dash(); if (!p.cpu) rumble(0.2, 0.3, 80);
+    p.dashT = 0.16; p.canDash = false; p.dashCd = 0.35; p.vx = p.face * 620; p.vy = 0; p.ride = null; p.rideP = null; SFX.dash(); if (!p.cpu) { rumble(0.2, 0.3, 80); stat("dashes"); }
   }
   const downPressed = !!inp.down && !p.prevDown; p.prevDown = !!inp.down;
   if (p.dashT > 0) {
@@ -753,18 +803,18 @@ function updatePlayer(p, inp, dt) {
     if (p.vy > 0) { p.vy = Math.min(p.vy, 115); p.sliding = true; if (Math.random() < 0.3) dust(dir > 0 ? p.x + p.w : p.x, p.y + p.h - 4, 1); }
   } else if (p.wallT > 0) p.wallT -= dt;
   if (p.buffer > 0 && !p.pound) {
-    if (p.coyote > 0) { p.vy = -625; p.coyote = 0; p.buffer = 0; p.onGround = false; p.ride = null; p.rideP = null; p.noCut = false; SFX.jump(); p.sx = 0.7; p.sy = 1.3; dust(p.x + p.w / 2, p.y + p.h); }
+    if (p.coyote > 0) { p.vy = -625; p.coyote = 0; p.buffer = 0; p.onGround = false; p.ride = null; p.rideP = null; p.noCut = false; SFX.jump(); if (!p.cpu) stat("jumps"); p.sx = 0.7; p.sy = 1.3; dust(p.x + p.w / 2, p.y + p.h); }
     else if (p.wallT > 0) {
       p.vy = -600; p.vx = -p.wallDir * 330; p.face = -p.wallDir; p.wallLock = 0.16; p.wallT = 0; p.buffer = 0; p.canDouble = true; p.canDash = true; p.noCut = false;
-      SFX.wall(); dust(p.wallDir > 0 ? p.x + p.w : p.x, p.y + p.h / 2, 5); p.sx = 0.7; p.sy = 1.3;
+      SFX.wall(); if (!p.cpu) stat("walls"); dust(p.wallDir > 0 ? p.x + p.w : p.x, p.y + p.h / 2, 5); p.sx = 0.7; p.sy = 1.3;
     }
-    else if (p.canDouble) { p.vy = -560; p.canDouble = false; p.buffer = 0; p.noCut = false; SFX.double(); p.sx = 0.75; p.sy = 1.25; burst(p.x + p.w / 2, p.y + p.h, "#ffffff", 10, 120, 0); }
+    else if (p.canDouble) { p.vy = -560; p.canDouble = false; p.buffer = 0; p.noCut = false; SFX.double(); if (!p.cpu) stat("jumps"); p.sx = 0.75; p.sy = 1.25; burst(p.x + p.w / 2, p.y + p.h, "#ffffff", 10, 120, 0); }
   }
   if (!inp.jump && !p.noCut && p.vy < -260) p.vy = -260;
   if (p.vy >= 0) p.noCut = false;
 
   // ground pound
-  if (downPressed && !p.onGround && !p.pound && p.dashT <= 0 && !p.sliding) { p.pound = 1; p.poundHold = 0.12; p.vx = 0; p.vy = 0; SFX.pound1(); }
+  if (downPressed && !p.onGround && !p.pound && p.dashT <= 0 && !p.sliding) { p.pound = 1; p.poundHold = 0.12; p.vx = 0; p.vy = 0; SFX.pound1(); if (!p.cpu) stat("pounds"); }
 
   const prevBottom = p.y + p.h, wasGround = p.onGround; p.pb = prevBottom;
   if (p.dashT > 0) p.vy = 0;
@@ -842,16 +892,16 @@ function updatePlayer(p, inp, dt) {
   }
   for (const s of L.springs) {
     if (p.vy >= 0 && overlap(p, { x: s.x + 4, y: s.y + 16, w: 24, h: 16 })) {
-      p.vy = p.pound ? -1250 : -1060; p.pound = 0; p.noCut = true; p.canDouble = true; p.canDash = true; p.onGround = false; p.ride = null; p.rideP = null; s.a = 1; SFX.spring(); if (!p.cpu) rumble(0.3, 0.3, 120); p.sx = 0.6; p.sy = 1.4;
+      p.vy = p.pound ? -1250 : -1060; p.pound = 0; p.noCut = true; p.canDouble = true; p.canDash = true; p.onGround = false; p.ride = null; p.rideP = null; s.a = 1; SFX.spring(); if (!p.cpu) { rumble(0.3, 0.3, 120); stat("springs"); } p.sx = 0.6; p.sy = 1.4;
     }
   }
   for (const c of L.coins) if (!c.got && Math.abs(c.x - pcx) < 20 && Math.abs(c.y - pcy) < 24) collectCoin(p, c);
   for (const g of L.gems) if (!g.got && Math.abs(g.x - pcx) < 22 && Math.abs(g.y - pcy) < 26) { g.got = true; SFX.gem(); rumble(0.2, 0.4, 150); burst(g.x, g.y, "#5ff0ff", 20, 180, 0); floats.push({ x: g.x, y: g.y - 10, t: "💎", life: 1 }); }
-  for (const kk of L.keys) if (!kk.got && Math.abs(kk.x - pcx) < 22 && Math.abs(kk.y - pcy) < 26) { kk.got = true; SFX.key(); burst(kk.x, kk.y, "#ffd23d", 20, 160, 0); floats.push({ x: kk.x, y: kk.y - 14, t: "🔑 الباب تحل!", life: 1.4 }); openDoors(kk.chunk); }
+  for (const kk of L.keys) if (!kk.got && Math.abs(kk.x - pcx) < 22 && Math.abs(kk.y - pcy) < 26) { kk.got = true; SFX.key(); if (!p.cpu) stat("keys"); burst(kk.x, kk.y, "#ffd23d", 20, 160, 0); floats.push({ x: kk.x, y: kk.y - 14, t: "🔑 الباب تحل!", life: 1.4 }); openDoors(kk.chunk); }
   for (const it of L.items) if (!it.got && Math.abs(it.x - pcx) < 22 && Math.abs(it.y - pcy) < 26) {
     it.got = true; SFX.power(); burst(it.x, it.y, it.kind === "star" ? "#ffe14d" : "#ff5a5a", 24, 200, 0);
-    if (it.kind === "star") { p.star = 8; floats.push({ x: it.x, y: it.y - 14, t: "⭐ ما كتموتش!", life: 1.4 }); }
-    else { p.magnet = 12; floats.push({ x: it.x, y: it.y - 14, t: "🧲 مغناطيس!", life: 1.4 }); }
+    if (it.kind === "star") { p.star = 8; if (!p.cpu) stat("stars"); floats.push({ x: it.x, y: it.y - 14, t: "⭐ ما كتموتش!", life: 1.4 }); }
+    else { p.magnet = 12; if (!p.cpu) stat("magnets"); floats.push({ x: it.x, y: it.y - 14, t: "🧲 مغناطيس!", life: 1.4 }); }
   }
   for (const ck of L.checks) if (Math.abs(ck.x + 16 - pcx) < 24 && pcy > ck.y - 40) {
     if (gameMode === "race") { if (!p.cp || p.cp.x < ck.x) { p.cp = { x: ck.x + 6, y: ck.y + T - 28 }; ck.on = true; if (!p.cpu) SFX.check(); } }
@@ -949,7 +999,7 @@ function updateWorld(dt) {
       if (!pt.on) all = false;
     }
     if (all) {
-      gr.open = true; SFX.door(); shake = 6;
+      gr.open = true; SFX.door(); stat("gates"); shake = 6;
       for (const g of gr.gates) { L.grid[g.r][g.c] = " "; if (g.r % 2) burst(g.c * T + 16, g.r * T + 16, "#9aa3b5", 6, 120); }
       const g0 = gr.gates[gr.gates.length - 1]; if (g0) floats.push({ x: g0.c * T, y: g0.r * T - 40, t: "🤝 تحلات البوابة!", life: 1.6 });
     }
@@ -1098,7 +1148,7 @@ function restartLevel() {
   else startLevel(L.i);
 }
 function updatePlay(dt) {
-  levelTime += dt; worldT += dt;
+  levelTime += dt; worldT += dt; stat("playT", dt);
   if (intro > 0) intro -= dt;
   if (bossBanner > 0) bossBanner -= dt;
   if (pressed.pause) { state = "pause"; pauseSel = 0; SFX.select(); return; }
@@ -1175,10 +1225,11 @@ function endlessOver() {
   if (state !== "play") return;
   const m = Math.floor(L.dist), nb = m > (save.endlessBest || 0);
   if (nb) save.endlessBest = m;
-  save.coins += coinCount; writeSave();
-  if (m >= 500) unlock("endless");
+  save.coins += coinCount; stat("coins", coinCount); writeSave();
+  if (m >= 100) unlock("endless100"); if (m >= 500) unlock("endless"); if (m >= 1000) unlock("endless1000");
+  if (save.coins >= 1000) unlock("rich");
   lastResult = { dist: m, coins: coinCount, newBest: nb, best: save.endlessBest };
-  state = "over"; completeT = 0;
+  state = "over"; completeT = 0; overSel = 0;
 }
 
 // ---------------- race mode ----------------
@@ -1191,8 +1242,10 @@ function raceFinish(p) {
   if (state !== "play") return;
   const order = [p, ...players.filter(q => q !== p).sort((a, b) => b.x - a.x)];
   let earned = 0; for (const q of players) if (!q.cpu) earned += q.coins;
-  save.coins += earned; writeSave();
-  if (!p.cpu) unlock("race");
+  save.coins += earned; stat("coins", earned);
+  const rb = save.raceBoard; rb.races++; rb.wins[p.id]++; order.forEach((q, i) => { rb.pts[q.id] += [3, 2, 1, 0][i]; });
+  writeSave();
+  if (!p.cpu) { unlock("race"); stat("raceWins"); }
   raceResult = { order, winner: p, time: levelTime, earned };
   state = "raceEnd"; completeT = 0; raceSel = 0; SFX.win(); rumble(0.4, 0.6, 400);
   burst(L.flag.x + 20, L.flag.y - 40, "#ffd23d", 40, 300);
@@ -1211,18 +1264,25 @@ function completeLevel() {
     if (nb) save.best[i] = levelTime;
     save.done[i] = true;
     const earned = coinCount + (L.boss ? 50 : 0) + (L.secret ? 100 : 0);
-    save.coins += earned; save.stats.coins = (save.stats.coins || 0) + coinCount;
+    save.coins += earned; stat("coins", coinCount);
     writeSave();
     unlock("first"); if (deaths === 0) unlock("nodeath"); if (levelTime < 30) unlock("fast");
-    if (save.stats.coins >= 500) unlock("coins500");
+    if (gems >= 3) unlock("perfect");
+    if (L.coins.length && L.coins.every(c => c.got)) unlock("coinsAll");
     if (worldGems(L.world) >= 18) unlock("gems");
-    if (L.boss && L.world === 0) unlock("boss1");
+    let tg = 0; for (let w = 0; w < WORLDS; w++) tg += worldGems(w);
+    if (tg >= 30) unlock("gems30"); if (tg >= WORLDS * 18) unlock("gems90");
+    const nDone = Object.keys(save.done).length; if (nDone >= 10) unlock("levels10"); if (nDone >= 30) unlock("levels30");
+    if (L.boss) { unlock("boss" + (L.world + 1)); if (deaths === 0) unlock("bossclean"); }
     if ([0, 1, 2, 3, 4].every(w => save.done[w * WPL + 6])) unlock("bossall");
     if (L.secret) unlock("secret");
+    if ([0, 1, 2, 3, 4].every(w => save.done[w * WPL + 7])) unlock("secret5");
+    if (players.filter(q => !q.cpu).length >= 2) unlock("duo");
     if (players.length === 4) unlock("team");
+    if (save.coins >= 1000) unlock("rich");
     lastResult = { gems, totalGems: 3, coins: coinCount, totalCoins: L.coins.length, time: levelTime, deaths, newBest: nb, earned, boss: L.boss ? L.bossE.name : null };
   }
-  state = "complete"; completeT = 0; SFX.win(); rumble(0.4, 0.6, 400);
+  state = "complete"; completeT = 0; completeSel = 0; SFX.win(); rumble(0.4, 0.6, 400);
   if (L.flag) { burst(L.flag.x + 20, L.flag.y - 40, "#ffd23d", 40, 300); burst(L.flag.x + 20, L.flag.y - 40, "#5ff0ff", 30, 260); }
 }
 function nextAfter(i) {
@@ -1291,7 +1351,8 @@ function updateShop(dt) {
   if (pressed.confirm) {
     const it = SHOP[shopRow][shopCol[shopRow]], key = SHOP_KEY[shopRow];
     if (save.owned[it[0]]) { save[key] = it[0]; SFX.ok(); shopMsg = "✓ لبستيها"; }
-    else if (save.coins >= it[2]) { save.coins -= it[2]; save.owned[it[0]] = 1; save[key] = it[0]; SFX.buy(); shopMsg = "🎉 شريتي " + it[1]; unlock("shop"); }
+    else if (it[2] < 0) { SFX.no(); shopMsg = "🏆 هادي ما كتتشراش، كتربحها من الإنجازات"; }
+    else if (save.coins >= it[2]) { save.coins -= it[2]; save.owned[it[0]] = 1; save[key] = it[0]; SFX.buy(); shopMsg = "🎉 شريتي " + it[1]; unlock("shop"); stat("buys"); if (HATS.every(h => h[2] < 0 || save.owned[h[0]])) unlock("hats"); }
     else { SFX.no(); shopMsg = "ما عندكش كوانات كافيين 🪙 (خاصك " + (it[2] - save.coins) + ")"; }
     shopMsgT = 2.2; writeSave();
   } else if (pressed.back) { state = "title"; SFX.select(); }
@@ -1335,9 +1396,9 @@ function updateEditor(dt) {
       SFX.ok();
       if (ed.menuSel === 0) { edSave(); state = "count"; }
       else if (ed.menuSel === 1) { ed.theme = (ed.theme + 1) % 5; edSave(); }
-      else if (ed.menuSel === 2) { if (ed.confirmClear) { const d = edDefault(); ed.rows = d.rows; ed.W = d.W; ed.scroll = 0; ed.cx = 4; ed.confirmClear = false; ed.menu = false; edSave(); } else ed.confirmClear = true; }
+      else if (ed.menuSel === 2) { if (ed.confirmClear) { const d = edDefault(); ed.rows = d.rows; ed.W = d.W; ed.scroll = 0; ed.cx = 4; ed.confirmClear = false; ed.menu = false; ed.lock = true; edSave(); } else ed.confirmClear = true; }
       else { edSave(); state = "title"; }
-    } else if (pressed.pause || pressed.back) ed.menu = false;
+    } else if (pressed.pause || pressed.back) { ed.menu = false; ed.lock = true; }
     return;
   }
   if (pressed.pause) { ed.menu = true; ed.menuSel = 0; ed.confirmClear = false; SFX.select(); return; }
@@ -1350,7 +1411,7 @@ function updateEditor(dt) {
   if (pressed.tabR) { ed.tool = (ed.tool + 1) % ED_TOOLS.length; SFX.select(); }
   if (mouse.wheel) { ed.tool = ((ed.tool + mouse.wheel) % ED_TOOLS.length + ED_TOOLS.length) % ED_TOOLS.length; mouse.wheel = 0; SFX.select(); }
   // palette (2 rows at the bottom)
-  const per = Math.ceil(ED_TOOLS.length / 2), pw = Math.min(54, (VW - 16) / per), px0 = VW / 2 - per * pw / 2, py0 = VH - ED_PAL_H;
+  const per = Math.ceil(ED_TOOLS.length / 2), pw = Math.min(54, (VW - 76) / per), px0 = 60 + (VW - 60) / 2 - per * pw / 2, py0 = VH - ED_PAL_H;
   let overPal = false;
   if (mouse.y >= py0) {
     overPal = true;
@@ -1694,6 +1755,7 @@ function drawHat(kind, cx, top, s, face = 1) {
   else if (kind === "top") { ctx.fillStyle = "#1c1c24"; ctx.fillRect(-13, -1, 26, 4); ctx.fillRect(-8, -20, 16, 20); ctx.fillStyle = "#e8394a"; ctx.fillRect(-8, -6, 16, 4); }
   else if (kind === "viking") { ctx.fillStyle = "#9aa3b5"; ctx.beginPath(); ctx.arc(0, 2, 11, Math.PI, 0); ctx.fill(); ctx.fillStyle = "#f4ecd8"; ctx.beginPath(); ctx.moveTo(-10, -2); ctx.quadraticCurveTo(-20, -6, -17, -18); ctx.lineTo(-8, -6); ctx.closePath(); ctx.moveTo(10, -2); ctx.quadraticCurveTo(20, -6, 17, -18); ctx.lineTo(8, -6); ctx.closePath(); ctx.fill(); ctx.fillStyle = "#ffd23d"; ctx.fillRect(-11, -1, 22, 3); }
   else if (kind === "crown") { ctx.fillStyle = "#ffd23d"; ctx.beginPath(); ctx.moveTo(-10, 2); ctx.lineTo(-10, -10); ctx.lineTo(-5, -4); ctx.lineTo(0, -13); ctx.lineTo(5, -4); ctx.lineTo(10, -10); ctx.lineTo(10, 2); ctx.closePath(); ctx.fill(); ctx.fillStyle = "#e8394a"; ctx.beginPath(); ctx.arc(0, -3, 2, 0, 7); ctx.fill(); ctx.fillStyle = "#5ff0ff"; ctx.beginPath(); ctx.arc(-6, -1, 1.6, 0, 7); ctx.arc(6, -1, 1.6, 0, 7); ctx.fill(); }
+  else if (kind === "halo") { ctx.shadowColor = "#fff39a"; ctx.shadowBlur = 10; ctx.strokeStyle = "#ffe14d"; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(0, -11 + Math.sin(time * 3) * 1.5, 10, 3.5, 0, 0, 7); ctx.stroke(); ctx.shadowBlur = 0; }
   ctx.restore();
 }
 function drawGlasses(kind, ex, ey, s) {
@@ -1702,6 +1764,7 @@ function drawGlasses(kind, ex, ey, s) {
   if (kind === "sun") { ctx.fillStyle = "#111"; rrect(-10, -3, 9, 6, 2); ctx.fill(); rrect(1, -3, 9, 6, 2); ctx.fill(); ctx.fillRect(-2, -2, 4, 2); ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.fillRect(-8, -2, 3, 1.5); ctx.fillRect(3, -2, 3, 1.5); }
   else if (kind === "round") { ctx.strokeStyle = "#5a3a1a"; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(-5, 0, 4.5, 0, 7); ctx.moveTo(9.5, 0); ctx.arc(5, 0, 4.5, 0, 7); ctx.moveTo(-0.5, 0); ctx.lineTo(0.5, 0); ctx.stroke(); }
   else if (kind === "star") { ctx.fillStyle = "#ffd23d"; star5(-5, 0, 6, 2.8); ctx.fill(); star5(5, 0, 6, 2.8); ctx.fill(); ctx.fillStyle = "#ff4fa0"; ctx.beginPath(); ctx.arc(-5, 0, 1.6, 0, 7); ctx.arc(5, 0, 1.6, 0, 7); ctx.fill(); }
+  else if (kind === "mask") { const wv = Math.sin(time * 8) * 2; ctx.fillStyle = "#1c1c28"; rrect(-12, -4, 24, 8, 3); ctx.fill(); ctx.beginPath(); ctx.moveTo(-11, -2); ctx.lineTo(-20, -6 + wv); ctx.lineTo(-19, 1 + wv); ctx.closePath(); ctx.fill(); ctx.fillStyle = "#e8394a"; ctx.fillRect(-12, -4, 24, 1.6); ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.ellipse(-5, 0.5, 3, 2, 0, 0, 7); ctx.ellipse(5, 0.5, 3, 2, 0, 0, 7); ctx.fill(); ctx.fillStyle = "#111"; ctx.beginPath(); ctx.arc(-4.5, 0.6, 1.3, 0, 7); ctx.arc(5.5, 0.6, 1.3, 0, 7); ctx.fill(); }
   ctx.restore();
 }
 function mascot(cx, cy, C, s = 1, look = 1, outfit = false) {
@@ -1753,12 +1816,13 @@ function drawPlayer(p) {
   const ex = cx + p.face * 4, ey = y + h * 0.38;
   ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.ellipse(ex - 5, ey, 4, 5, 0, 0, 7); ctx.ellipse(ex + 5, ey, 4, 5, 0, 0, 7); ctx.fill();
   ctx.fillStyle = "#111"; ctx.beginPath(); ctx.arc(ex - 5 + p.face * 1.5, ey + (p.vy > 200 ? 2 : 0), 2.2, 0, 7); ctx.arc(ex + 5 + p.face * 1.5, ey + (p.vy > 200 ? 2 : 0), 2.2, 0, 7); ctx.fill();
-  drawGlasses(save.glasses, ex, ey, 0.95);
-  drawHat(save.hat, cx, y, 1, p.face);
+  const O = getOutfit(p.id);
+  drawGlasses(O.glasses, ex, ey, 0.95);
+  drawHat(O.hat, cx, y, 1, p.face);
   ctx.restore();
-  if (p.magnet > 0) drawItem("magnet", cx, y - (save.hat !== "none" ? 30 : 18), 0.55);
+  if (p.magnet > 0) drawItem("magnet", cx, y - (O.hat !== "none" ? 30 : 18), 0.55);
   if (!p.canDouble && !p.onGround) { ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.beginPath(); ctx.arc(cx, by + 4, 3, 0, 7); ctx.fill(); }
-  if (players.length > 1) txt(p.cpu ? "🤖" : "P" + (p.id + 1), cx, y - (save.hat !== "none" ? 26 : 12) - (p.magnet > 0 ? 14 : 0), 12, C.body, "center", "900", "rgba(0,0,0,0.6)");
+  if (players.length > 1) txt(p.cpu ? "🤖" : "P" + (p.id + 1), cx, y - (O.hat !== "none" ? 26 : 12) - (p.magnet > 0 ? 14 : 0), 12, C.body, "center", "900", "rgba(0,0,0,0.6)");
 }
 function drawFx() {
   for (const q of particles) { ctx.globalAlpha = clamp(q.life / q.max, 0, 1) * (q.size > 10 ? 0.35 : 1); ctx.fillStyle = q.color; ctx.fillRect(q.x - q.size / 2, q.y - q.size / 2, q.size, q.size); }
@@ -1800,6 +1864,10 @@ function drawHud() {
       ctx.globalAlpha = 1;
     });
   }
+  if (race && save.raceBoard.races > 0) {
+    const rk = raceRank();
+    txt("🏆 " + rk.map((id, i) => MEDAL[i] + raceLabel(id) + " " + save.raceBoard.pts[id]).join("   "), VW - 20, 104, 12, "#ffffff", "right", "800", "rgba(0,0,0,0.7)");
+  }
   // power-up timers
   let px = 20;
   for (const p of players) {
@@ -1818,7 +1886,6 @@ function drawHud() {
     ctx.fillStyle = "#ff3b3b"; rrect(bx, by, bw * b.hp / b.max, 14, 6); ctx.fill();
     txt("👹 " + b.name, VW / 2, by + 30, 15, "#ffffff", "center", "900", "rgba(0,0,0,0.6)");
   }
-  if (!musicOn) txt("🔇", VW - 80, 30, 16, "#ffffff", "right");
   if (intro > 0) {
     ctx.globalAlpha = clamp(intro, 0, 1);
     txt(endless ? "♾️ بلا نهاية" : lvlName(L.i), VW / 2, VH / 2 - 60, 54, "#ffffff", "center", "900", "rgba(0,0,0,0.5)");
@@ -1847,6 +1914,250 @@ function drawLevelScene() {
   if (gameMode === "endless") { const g = ctx.createLinearGradient(0, 0, 40, 0); g.addColorStop(0, "rgba(255,40,40,0.45)"); g.addColorStop(1, "rgba(255,40,40,0)"); ctx.fillStyle = g; ctx.fillRect(0, 0, 40, VH); }
 }
 
+// ---------------- mouse buttons for menus ----------------
+// each frame the drawing code registers its buttons; the next step uses them for hover + click
+let ui = [], uiLast = [];
+function uiBtn(x, y, w, h, hover, act) { ui.push({ x, y, w, h, hover, act }); }
+function uiHit(b) { return mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h; }
+function uiMouse() {
+  let over = null;
+  for (let i = uiLast.length - 1; i >= 0; i--) if (uiHit(uiLast[i])) { over = uiLast[i]; break; }
+  cv.style.cursor = over ? "pointer" : "default";
+  if (!over) return;
+  if (mouse.moved && over.hover) over.hover();
+  if (mouse.clicked) {
+    mouse.clicked = false;
+    if (over.hover) over.hover();
+    if (over.act === "confirm" || over.act === "back") pressed[over.act] = true;
+    else if (over.act) over.act();
+  }
+}
+function drawBack(act = "back") {
+  const x = 12, y = 10, w = 100, h = 32, on = uiHit({ x, y, w, h });
+  ctx.fillStyle = on ? "#ffffff" : "rgba(0,0,0,0.45)"; rrect(x, y, w, h, 12); ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth = 2; rrect(x, y, w, h, 12); ctx.stroke();
+  txt("↩ رجوع", x + w / 2, y + h / 2 + 1, 15, on ? "#0b3a52" : "#ffffff", "center", "900");
+  uiBtn(x, y, w, h, null, act);
+}
+// a row of buttons, index 0 on the right (Arabic reading order)
+function drawBtnRow(labels, cur, y, onHover) {
+  const n = labels.length, bw = Math.min(200, (VW - 40) / n - 10);
+  labels.forEach((o, i) => {
+    const x = VW / 2 + ((n - 1) / 2 - i) * (bw + 12), on = i === cur;
+    ctx.fillStyle = on ? "#ffffff" : "rgba(255,255,255,0.18)"; rrect(x - bw / 2, y - 19, bw, 38, 14); ctx.fill();
+    if (on) { ctx.strokeStyle = "#ffd23d"; ctx.lineWidth = 4; rrect(x - bw / 2 - 2, y - 21, bw + 4, 42, 15); ctx.stroke(); }
+    txt(o, x, y + 1, 17, on ? "#0b3a52" : "#ffffff", "center", "900");
+    uiBtn(x - bw / 2, y - 19, bw, 38, () => onHover(i), "confirm");
+  });
+}
+function rowNav(cur, n) {
+  const old = cur;
+  if (rep("right")) cur = Math.max(0, cur - 1);
+  if (rep("left")) cur = Math.min(n - 1, cur + 1);
+  if (cur !== old) SFX.select();
+  return cur;
+}
+
+// ---------------- per-player outfits (P1 = what is worn in the shop) ----------------
+let joinCat = [0, 0, 0, 0], joinPrev = {};
+function getOutfit(k) {
+  if (!k) return save;
+  if (!save.outfits[k]) save.outfits[k] = { hat: "none", glasses: "gnone", color: "cdef" };
+  return save.outfits[k];
+}
+function cycleOutfit(k, d) {
+  const cat = joinCat[k], key = SHOP_KEY[cat], o = getOutfit(k), list = SHOP[cat].filter(it => save.owned[it[0]]);
+  if (list.length < 2) { SFX.no(); return; }
+  const i = Math.max(0, list.findIndex(it => it[0] === o[key]));
+  o[key] = list[(i + d + list.length) % list.length][0]; writeSave(); SFX.select();
+}
+function joinStart() { team = joinSlots.map(s => s || "cpu"); SFX.ok(); afterJoin(); }
+function updateJoin(edges) {
+  if (pressed.back) { state = "count"; return; }
+  for (let k = 0; k < joinSlots.length; k++) {   // each joined player picks their own look
+    const d = joinSlots[k]; if (!d) continue;
+    const i = devInput(d), pv = joinPrev[d] || { up: true, down: true, left: true, right: true };
+    if (i.up && !pv.up) { joinCat[k] = (joinCat[k] + 2) % 3; SFX.select(); }
+    if (i.down && !pv.down) { joinCat[k] = (joinCat[k] + 1) % 3; SFX.select(); }
+    if (i.left && !pv.left) cycleOutfit(k, -1);
+    if (i.right && !pv.right) cycleOutfit(k, 1);
+    joinPrev[d] = { up: i.up, down: i.down, left: i.left, right: i.right };
+  }
+  for (const d of edges) {
+    if (d === joinSlots[0]) { joinStart(); break; }
+    if (joinSlots.includes(d)) continue;
+    const free = joinSlots.indexOf(null);
+    if (free >= 0) { joinSlots[free] = d; SFX.check(); }
+  }
+}
+function drawJoin() {
+  drawSky(THEMES[0], time * 20);
+  ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(0, 0, VW, VH);
+  txt("دخلو اللاعبين واختارو اللبسة ديالكم", VW / 2, 42, 28, "#ffffff", "center", "900", "rgba(0,0,0,0.5)");
+  const n = playerCount, cw = Math.min(200, (VW - 30) / n), y = 204;
+  for (let k = 0; k < n; k++) {
+    const x = VW / 2 + (k - (n - 1) / 2) * cw, d = joinSlots[k], O = getOutfit(k), C = outfitCol(PCOL[k], O.color);
+    ctx.fillStyle = d ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.15)"; rrect(x - cw / 2 + 8, y - 124, cw - 16, 274, 18); ctx.fill();
+    ctx.strokeStyle = C.body; ctx.lineWidth = 4; rrect(x - cw / 2 + 8, y - 124, cw - 16, 274, 18); ctx.stroke();
+    txt("P" + (k + 1), x, y - 106, 20, d ? C.dark : C.body, "center", "900");
+    ctx.globalAlpha = d ? 1 : 0.6; mascot(x, y - 56, C, 0.85, Math.sin(time * 2 + k), O); ctx.globalAlpha = 1;
+    const fs = Math.min(13, cw / 13);
+    txt(d ? devName(d) : "ضغط A باش تدخل • وإلا 🤖", x, y + 20, fs, d ? "#0b3a52" : "#ffe68a", "center", "800");
+    const rw = cw - 30;
+    for (let r = 0; r < 3; r++) {
+      const ry = y + 52 + r * 30, on = joinCat[k] === r, it = SHOP[r].find(it => it[0] === O[SHOP_KEY[r]]) || SHOP[r][0];
+      ctx.fillStyle = on ? "#ffd23d" : d ? "rgba(11,58,82,0.12)" : "rgba(0,0,0,0.3)"; rrect(x - rw / 2, ry - 12, rw, 24, 10); ctx.fill();
+      const tc = on || d ? "#0b3a52" : "#ffffff";
+      txt(SHOP_TITLE[r].split(" ")[0] + " " + it[1], x, ry + 1, fs, tc, "center", "800");
+      txt("◀", x - rw / 2 + 11, ry + 1, 12, tc, "center", "900"); txt("▶", x + rw / 2 - 11, ry + 1, 12, tc, "center", "900");
+      const pick = () => { if (joinCat[k] !== r) { joinCat[k] = r; SFX.select(); } };
+      uiBtn(x - rw / 2, ry - 12, 26, 24, pick, () => cycleOutfit(k, -1));
+      uiBtn(x + rw / 2 - 26, ry - 12, 26, 24, pick, () => cycleOutfit(k, 1));
+      uiBtn(x - rw / 2 + 26, ry - 12, rw - 52, 24, pick, () => cycleOutfit(k, 1));
+    }
+  }
+  const bw = 250, bx = VW / 2 - bw / 2, by = 366, hov = uiHit({ x: bx, y: by, w: bw, h: 42 }), pulse = Math.floor(time * 2) % 2;
+  ctx.fillStyle = hov ? "#ffffff" : pulse ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.75)"; rrect(bx, by, bw, 42, 16); ctx.fill();
+  ctx.strokeStyle = "#ffd23d"; ctx.lineWidth = 4; rrect(bx, by, bw, 42, 16); ctx.stroke();
+  txt("▶ يلاه نبداو", VW / 2, by + 22, 20, "#0b3a52", "center", "900");
+  uiBtn(bx, by, bw, 42, null, joinStart);
+  txt("P1: ضغط A مرة أخرى باش تبداو  •  ⬆ ⬇ اختار  •  ⬅ ➡ بدل اللبسة", VW / 2, 430, 14, "#ffffff", "center", "800", "rgba(0,0,0,0.6)");
+  txt("كل واحد كيختار من الحوايج اللي ربحتي ولا شريتي فالحانوت 🛒", VW / 2, VH - 18, 13, "#ffe68a", "center", "700", "rgba(0,0,0,0.6)");
+  drawBack();
+}
+
+// ---------------- continue or new game ----------------
+let saveSel = 0, saveConfirm = false;
+function hasSave(mode) { return mode === "race" ? save.raceBoard.races > 0 : Object.keys(save.done).length > 0; }
+function openSaveMenu() { state = "saveMenu"; saveSel = 0; saveConfirm = false; }
+function saveOpts() { return ["▶ كمّل من فين حبستي", saveConfirm ? "⚠ متأكد؟ ضغط مرة أخرى" : "✨ لعبة جديدة"]; }
+function saveChoose() {
+  SFX.ok();
+  if (saveSel === 0) { state = "count"; return; }
+  if (!saveConfirm) { saveConfirm = true; return; }
+  if (gameMode === "race") save.raceBoard = { races: 0, wins: [0, 0, 0, 0], pts: [0, 0, 0, 0] };
+  else { save.done = {}; save.stars = {}; save.best = {}; sel = 0; }
+  writeSave(); saveConfirm = false; state = "count";
+}
+function updateSaveMenu() {
+  if (rep("down") || rep("up")) { saveSel = 1 - saveSel; saveConfirm = false; SFX.select(); }
+  if (pressed.confirm) saveChoose();
+  else if (pressed.back) state = "title";
+}
+function drawSaveMenu() {
+  const race = gameMode === "race";
+  drawSky(THEMES[race ? 1 : 0], time * 20);
+  ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(0, 0, VW, VH);
+  txt(MODE_NAME[gameMode], VW / 2, 58, 38, "#ffffff", "center", "900", "rgba(0,0,0,0.5)");
+  txt("لقينا لعبة محفوظة فهاد المتصفح 💾", VW / 2, 102, 18, "#ffe68a", "center", "800", "rgba(0,0,0,0.6)");
+  const pw = Math.min(520, VW - 40);
+  ctx.fillStyle = "rgba(0,0,0,0.4)"; rrect(VW / 2 - pw / 2, 124, pw, 74, 16); ctx.fill();
+  if (race) {
+    const rb = save.raceBoard, rank = [0, 1, 2, 3].filter(k => rb.pts[k] > 0 || rb.wins[k] > 0).sort((a, b) => rb.pts[b] - rb.pts[a] || rb.wins[b] - rb.wins[a]);
+    txt("🏁 " + rb.races + " سباق", VW / 2, 146, 18, "#ffffff", "center", "900");
+    txt(rank.map((id, i) => ["🥇", "🥈", "🥉", "4."][i] + " P" + (id + 1) + "  ⭐" + rb.pts[id] + " 🏆" + rb.wins[id]).join("     "), VW / 2, 176, 15, "#ffe68a", "center", "800");
+  } else {
+    let tg = 0; for (let w = 0; w < WORLDS; w++) tg += worldGems(w);
+    const nd = Object.keys(save.done).length, nb = [0, 1, 2, 3, 4].filter(w => save.done[w * WPL + 6]).length;
+    txt("✅ " + nd + " / " + LEVELS + " مرحلة   •   💎 " + tg + " / " + WORLDS * 18 + "   •   👑 " + nb + " / 5", VW / 2, 148, 18, "#ffffff", "center", "900");
+    txt("🪙 " + save.coins + "   •   🏆 " + ACH.filter(a => save.ach[a[0]]).length + " إنجاز", VW / 2, 176, 15, "#ffe68a", "center", "800");
+  }
+  saveOpts().forEach((o, k) => {
+    const bw = 340, x = VW / 2 - bw / 2, y = 226 + k * 64, on = k === saveSel, warn = k === 1 && saveConfirm;
+    ctx.fillStyle = on ? (warn ? "#ffdddd" : "#ffffff") : "rgba(0,0,0,0.35)"; rrect(x, y, bw, 50, 16); ctx.fill();
+    if (on) { ctx.strokeStyle = warn ? "#ff5a5a" : "#ffd23d"; ctx.lineWidth = 4; rrect(x - 3, y - 3, bw + 6, 56, 18); ctx.stroke(); }
+    txt(o, VW / 2, y + 26, 21, on ? (warn ? "#a01010" : "#0b3a52") : "#ffffff", "center", "900");
+    uiBtn(x, y, bw, 50, () => { if (saveSel !== k) { saveSel = k; saveConfirm = false; SFX.select(); } }, () => { saveSel = k; saveChoose(); });
+  });
+  txt(race ? "✨ لعبة جديدة كتمسح غير الترتيب ديال السباقات" : "✨ لعبة جديدة كتمسح المراحل • الكوانات والحوايج والإنجازات كيبقاو 🪙🎩🏆", VW / 2, 386, 14, "#ffffff", "center", "700", "rgba(0,0,0,0.6)");
+  txt("⬆ ⬇ اختار  •  A تأكد  •  B رجوع  •  🖱 ولا كليكي", VW / 2, VH - 18, 14, "#ffffff", "center", "700", "rgba(0,0,0,0.5)");
+  drawBack();
+}
+
+// ---------------- race standings (saved across races) ----------------
+function raceRank() {
+  const rb = save.raceBoard, n = players.length;
+  return [0, 1, 2, 3].filter(k => k < n || rb.pts[k] > 0).sort((a, b) => rb.pts[b] - rb.pts[a] || rb.wins[b] - rb.wins[a] || a - b);
+}
+function raceLabel(k) { const p = players[k]; return (p && p.cpu ? "🤖" : "") + "P" + (k + 1); }
+const MEDAL = ["🥇", "🥈", "🥉", "4."];
+function drawRaceEnd() {
+  const r = raceResult, k = clamp(completeT * 2, 0, 1);
+  ctx.fillStyle = `rgba(0,0,0,${0.6 * k})`; ctx.fillRect(0, 0, VW, VH);
+  ctx.globalAlpha = k;
+  const w = r.winner;
+  txt(w.cpu ? "ربح الكومبيوتر 🤖🏆" : "ربح P" + (w.id + 1) + " 🏆", VW / 2, 54, 40, "#ffd23d", "center", "900", "rgba(0,0,0,0.5)");
+  txt("⏱ " + fmtTime(r.time), VW / 2, 94, 18, "#ffffff", "center", "800");
+  // overall standings: 3 / 2 / 1 points per race, sorted by score
+  const rb = save.raceBoard, rank = raceRank(), chw = Math.min(160, (VW - 40) / rank.length);
+  txt("📊 الترتيب العام  •  " + rb.races + " سباق", VW / 2, 124, 16, "#ffe68a", "center", "900", "rgba(0,0,0,0.6)");
+  rank.forEach((id, i) => {
+    const x = VW / 2 + ((rank.length - 1) / 2 - i) * chw, y = 162, C = outfitCol(PCOL[id], getOutfit(id).color), top = i === 0;
+    ctx.fillStyle = top ? "rgba(255,214,70,0.95)" : "rgba(255,255,255,0.16)"; rrect(x - chw / 2 + 5, y - 22, chw - 10, 44, 12); ctx.fill();
+    ctx.fillStyle = C.body; rrect(x - chw / 2 + 11, y - 14, 8, 28, 4); ctx.fill();
+    const tc = top ? "#3a2a00" : "#ffffff";
+    txt(MEDAL[i] + " " + raceLabel(id), x + 6, y - 9, 14, tc, "center", "900");
+    txt("⭐ " + rb.pts[id] + "   🏆 " + rb.wins[id], x + 6, y + 11, 13, tc, "center", "800");
+  });
+  const n = r.order.length, cw = Math.min(170, (VW - 40) / n), podium = [110, 82, 60, 44], base = 404;
+  r.order.forEach((p, i) => {
+    const x = VW / 2 + (i - (n - 1) / 2) * cw, ph = podium[i];
+    ctx.fillStyle = ["#ffd23d", "#d8dde6", "#d9905a", "#8a8fa0"][i]; rrect(x - cw / 2 + 10, base - ph, cw - 20, ph, 10); ctx.fill();
+    txt("" + (i + 1), x, base - ph / 2, 30, "#0b2030", "center", "900");
+    mascot(x, base - ph - 52 - (i === 0 ? Math.abs(Math.sin(time * 5)) * 12 : 0), pcol(p), 0.8, 1, getOutfit(p.id));
+    txt(p.cpu ? "🤖" : "P" + (p.id + 1), x + cw / 2 - 28, base - ph - 12, 14, "#ffffff", "center", "900", "rgba(0,0,0,0.6)");
+    txt("🪙 " + p.coins, x, base + 13, 13, "#ffe68a", "center", "800");
+  });
+  if (completeT > 1.2) drawBtnRow(["▶ المرحلة الجاية", "🔁 عاود السباق", "🗺️ الخريطة"], raceSel, VH - 24, i => { if (raceSel !== i) { raceSel = i; SFX.select(); } });
+  ctx.globalAlpha = 1;
+}
+
+// ---------------- achievements screen (pages of 16) ----------------
+let achPage = 0;
+const ACH_PER = 16;
+function drawAch() {
+  drawSky(THEMES[3], time * 15);
+  ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.fillRect(0, 0, VW, VH);
+  const got = ACH.filter(a => save.ach[a[0]]).length, pages = Math.ceil(ACH.length / ACH_PER);
+  achPage = clamp(achPage, 0, pages - 1);
+  txt("🏆 الإنجازات  " + got + " / " + ACH.length, VW / 2, 30, 28, "#ffffff", "center", "900", "rgba(0,0,0,0.5)");
+  const cols = 4, cw = Math.min(250, (VW - 30) / cols), ch = 84, x0 = VW / 2 - cols * cw / 2;
+  ACH.slice(achPage * ACH_PER, (achPage + 1) * ACH_PER).forEach((a, k) => {
+    const c = cols - 1 - (k % cols), r = Math.floor(k / cols), x = x0 + c * cw, y = 58 + r * (ch + 6), on = !!save.ach[a[0]];
+    ctx.fillStyle = on ? "rgba(255,255,255,0.92)" : "rgba(0,0,0,0.42)"; rrect(x + 4, y, cw - 8, ch, 14); ctx.fill();
+    if (on) { ctx.strokeStyle = "#ffd23d"; ctx.lineWidth = 2; rrect(x + 4, y, cw - 8, ch, 14); ctx.stroke(); }
+    ctx.globalAlpha = on ? 1 : 0.65;
+    txt(on ? a[1] : "🔒", x + cw - 30, y + ch / 2 - 2, 26, "#fff", "center");
+    txt(a[2], x + cw - 54, y + 19, 15, on ? "#0b3a52" : "#ffffff", "right", "900");
+    txt(a[3], x + cw - 54, y + 41, 11, on ? "#3a5a6a" : "#d8d8d8", "right", "700");
+    txt("🎁 " + a[4] + " 🪙" + (a[5] ? " + " + itemName(a[5]) : ""), x + cw - 54, y + 64, 11, on ? "#1f9a3c" : "#ffe68a", "right", "800");
+    if (on) txt("✓", x + 20, y + 18, 16, "#2fb84a", "center", "900");
+    ctx.globalAlpha = 1;
+  });
+  const py = 438;
+  const pbtn = (x, label, d, ok) => {
+    const b = { x: x - 22, y: py - 18, w: 44, h: 36 }, h = ok && uiHit(b);
+    ctx.globalAlpha = ok ? 1 : 0.3;
+    ctx.fillStyle = h ? "#ffffff" : "rgba(0,0,0,0.45)"; rrect(b.x, b.y, b.w, b.h, 12); ctx.fill();
+    txt(label, x, py + 1, 18, h ? "#0b3a52" : "#ffffff", "center", "900"); ctx.globalAlpha = 1;
+    if (ok) uiBtn(b.x, b.y, b.w, b.h, null, () => { achPage += d; SFX.select(); });
+  };
+  txt((achPage + 1) + " / " + pages, VW / 2, py + 1, 17, "#ffffff", "center", "900", "rgba(0,0,0,0.5)");
+  pbtn(VW / 2 - 64, "◀", 1, achPage < pages - 1); pbtn(VW / 2 + 64, "▶", -1, achPage > 0);
+  txt("⬅ ➡ الصفحات  •  كل إنجاز كيعطيك كوانات 🪙 وشي وحدين كيعطيو حوايج خاصة 🎁", VW / 2, VH - 12, 12, "#ffffff", "center", "700", "rgba(0,0,0,0.5)");
+  drawBack();
+}
+
+// ---------------- buttons for the result screens ----------------
+let completeSel = 0, overSel = 0;
+function completeOpts() {
+  if (lastResult.custom) return [["🔁 عاود", () => startCustom()], ["🛠️ المحرر", () => openEditor()]];
+  const nx = nextAfter(L.i), toMap = () => { state = "map"; if (typeof nx === "number" && isUnlocked(nx)) sel = nx; mapInit(); };
+  if (nx === "end") return [["▶ كمّل", () => { state = "end"; }], ["🗺️ الخريطة", toMap]];
+  if (nx === "map") return [["🗺️ الخريطة", toMap], ["🔁 عاود", () => startLevel(L.i)]];
+  return [["▶ المرحلة الجاية", () => startLevel(nx)], ["🔁 عاود", () => startLevel(L.i)], ["🗺️ الخريطة", toMap]];
+}
+
 // ---------------- menus ----------------
 const TITLE_OPTS = [["🎮", "المغامرة"], ["🏁", "السباق"], ["♾️", "بلا نهاية"], ["🛠️", "صانع المراحل"], ["🛒", "الحانوت"], ["🏆", "الإنجازات"]];
 function drawTitle() {
@@ -1855,13 +2166,14 @@ function drawTitle() {
   txt("HOPPO", VW / 2, 70 + by, 84, "#3de0ff", "center", "900", "#0b3a52");
   txt("مغامرة القفز", VW / 2, 128, 24, "#ffffff", "center", "800", "rgba(0,0,0,0.5)");
   mascot(VW / 2 - 175, 150 - Math.abs(Math.sin(time * 4)) * 18, outfitCol(PCOL[0]), 0.8, 1, true);
-  mascot(VW / 2 + 175, 150 - Math.abs(Math.sin(time * 4 + 1.5)) * 18, PCOL[1], 0.8, -1);
+  mascot(VW / 2 + 175, 150 - Math.abs(Math.sin(time * 4 + 1.5)) * 18, outfitCol(PCOL[1], getOutfit(1).color), 0.8, -1, getOutfit(1));
   ctx.fillStyle = "rgba(0,0,0,0.35)"; rrect(VW - 120, 12, 108, 32, 12); ctx.fill(); coinIcon(VW - 100, 28); txt("" + save.coins, VW - 84, 29, 17, "#fff", "left", "800");
   const bw = Math.min(250, VW / 2 - 30), bh = 50;
   TITLE_OPTS.forEach((o, k) => {
     const col = k % 2, row = Math.floor(k / 2), x = col ? VW / 2 - 10 - bw : VW / 2 + 10, y = 230 + row * 62, on = k === titleSel;
     ctx.fillStyle = on ? "#ffffff" : "rgba(0,0,0,0.35)"; rrect(x, y, bw, bh, 16); ctx.fill();
     if (on) { ctx.strokeStyle = "#ffd23d"; ctx.lineWidth = 4; rrect(x - 3, y - 3, bw + 6, bh + 6, 18); ctx.stroke(); }
+    uiBtn(x, y, bw, bh, () => { if (titleSel !== k) { titleSel = k; SFX.select(); } }, "confirm");
     txt(o[0] + "  " + o[1], x + bw / 2, y + bh / 2 + 1, 21, on ? "#0b3a52" : "#ffffff", "center", "900");
   });
   const pad = getPad();
@@ -1877,12 +2189,13 @@ function drawCount() {
   for (let n = 1; n <= 4; n++) {
     const x = VW / 2 + (n - 2.5) * cw, on = n === playerCount, y = 230, dis = n < minN;
     ctx.globalAlpha = dis ? 0.3 : 1;
+    if (!dis) uiBtn(x - cw / 2 + 8, y - 120, cw - 16, 220, () => { if (playerCount !== n) { playerCount = n; SFX.select(); } }, "confirm");
     ctx.fillStyle = on ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.18)"; rrect(x - cw / 2 + 8, y - 120, cw - 16, 220, 18); ctx.fill();
     if (on) { ctx.strokeStyle = "#ffd23d"; ctx.lineWidth = 5; rrect(x - cw / 2 + 5, y - 123, cw - 10, 226, 20); ctx.stroke(); }
     txt("" + n, x, y - 80, 48, on ? "#0b3a52" : "#ffffff", "center", "900");
     for (let k = 0; k < n; k++) {
       const s = n === 1 ? 0.9 : n === 2 ? 0.7 : 0.5, gap = 56 * s + 4;
-      mascot(x + (k - (n - 1) / 2) * gap, y - 20 + (on ? -Math.abs(Math.sin(time * 5 + k)) * 10 : 0), k === 0 ? outfitCol(PCOL[0]) : PCOL[k], s, 1, true);
+      mascot(x + (k - (n - 1) / 2) * gap, y - 20 + (on ? -Math.abs(Math.sin(time * 5 + k)) * 10 : 0), outfitCol(PCOL[k], getOutfit(k).color), s, 1, getOutfit(k));
     }
     txt(n === 1 ? "بوحدك" : n + " لاعبين", x, y + 75, 18, on ? "#0b3a52" : "#ffffff", "center", "800");
     ctx.globalAlpha = 1;
@@ -1890,28 +2203,8 @@ function drawCount() {
   const info = gameMode === "race" ? "🏁 كل واحد بوحدو: اللي وصل اللول للعلم هو اللي ربح!" : gameMode === "endless" ? "♾️ الشاشة كتمشي بوحدها وكتزيد فالسرعة، شوف فين توصل!" : "فاللعب الجماعي: كتطلعو على روس بعضياتكم 🧍‍♂️ واللي مات كيولي فقاعة 🫧";
   txt(info, VW / 2, 380, 15, "#ffffff", "center", "700", "rgba(0,0,0,0.6)");
   txt("اللي ما عندوش مانيطة، كيلعب بلاصتو الكومبيوتر 🤖", VW / 2, 406, 15, "#ffe68a", "center", "700", "rgba(0,0,0,0.6)");
-  txt("⬅ ➡ باش تختار   •   A / Space باش تأكد   •   B / Esc رجوع", VW / 2, VH - 20, 14, "#ffffff", "center", "700", "rgba(0,0,0,0.5)");
-}
-function drawJoin() {
-  drawSky(THEMES[0], time * 20);
-  ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(0, 0, VW, VH);
-  txt("دخلو اللاعبين", VW / 2, 46, 32, "#ffffff", "center", "900", "rgba(0,0,0,0.5)");
-  const n = playerCount, cw = Math.min(190, (VW - 30) / n);
-  for (let k = 0; k < n; k++) {
-    const x = VW / 2 + (k - (n - 1) / 2) * cw, y = 210, d = joinSlots[k], C = k === 0 ? outfitCol(PCOL[0]) : PCOL[k];
-    ctx.fillStyle = d ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.15)"; rrect(x - cw / 2 + 8, y - 120, cw - 16, 250, 18); ctx.fill();
-    ctx.strokeStyle = C.body; ctx.lineWidth = 4; rrect(x - cw / 2 + 8, y - 120, cw - 16, 250, 18); ctx.stroke();
-    txt("P" + (k + 1), x, y - 95, 24, d ? C.dark : C.body, "center", "900");
-    ctx.globalAlpha = d ? 1 : 0.45; mascot(x, y - 60, C, 0.9, Math.sin(time * 2 + k), true); ctx.globalAlpha = 1;
-    if (d) txt(devName(d), x, y + 30, Math.min(14, cw / 12), "#0b3a52", "center", "800");
-    else {
-      txt("ضغط A باش تدخل", x, y + 20, 14, "#ffffff", "center", "800");
-      txt("(Space ولا Enter)", x, y + 42, 12, "#dddddd", "center", "700");
-      txt("وإلا: 🤖 كومبيوتر", x, y + 80, 13, "#ffe68a", "center", "800");
-    }
-  }
-  if (Math.floor(time * 2) % 2) txt("P1: ضغط A مرة أخرى باش تبداو", VW / 2, 380, 22, "#ffffff", "center", "900", "rgba(0,0,0,0.6)");
-  txt("B / Esc رجوع", VW / 2, VH - 20, 14, "#ffffff", "center", "700", "rgba(0,0,0,0.5)");
+  txt("⬅ ➡ باش تختار   •   A / Space باش تأكد   •   B / Esc رجوع   •   🖱 ولا كليكي", VW / 2, VH - 20, 14, "#ffffff", "center", "700", "rgba(0,0,0,0.5)");
+  drawBack();
 }
 function drawMap() {
   const w = mapW, th = THEMES[w], nodes = mapNodes(w);
@@ -1927,6 +2220,7 @@ function drawMap() {
   for (let k = 0; k < WPL; k++) {
     const i = w * WPL + k, n = nodes[k], un = isUnlocked(i), on = i === sel, done = !!save.done[i];
     const R = k === 6 ? 30 : k === 7 ? 26 : 22, raceNo = gameMode === "race" && k === 6;
+    if (mapOk(i)) uiBtn(n.x - R, n.y - R, R * 2, R * 2, () => { if (sel !== i) { sel = i; SFX.select(); } }, "confirm");
     if (k === 7 && !un) {
       ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.beginPath(); ctx.arc(n.x, n.y, R, 0, 7); ctx.fill();
       txt("?", n.x, n.y + 1, 24, "#ffd23d", "center", "900");
@@ -1941,22 +2235,33 @@ function drawMap() {
     txt(label, n.x, n.y + 1, k >= 6 || !un ? 22 : 20, done && k < 6 ? "#ffffff" : "#0b3a52", "center", "900");
     if (un && k < 7) for (let s = 0; s < 3; s++) { const st = save.stars[i] || 0; ctx.fillStyle = s < st ? "#5ff0ff" : "rgba(255,255,255,0.35)"; const gx = n.x - 14 + s * 14, gy = n.y + R + 10; ctx.beginPath(); ctx.moveTo(gx, gy - 5); ctx.lineTo(gx + 4, gy); ctx.lineTo(gx, gy + 6); ctx.lineTo(gx - 4, gy); ctx.closePath(); ctx.fill(); }
   }
+  const arrow = (x, label, tgt) => {
+    const b = { x: x - 22, y: 178, w: 44, h: 44 }, h = uiHit(b);
+    ctx.fillStyle = h ? "#ffffff" : "rgba(0,0,0,0.45)"; ctx.beginPath(); ctx.arc(x, 200, 22, 0, 7); ctx.fill();
+    ctx.strokeStyle = "#ffd23d"; ctx.lineWidth = 3; ctx.stroke();
+    txt(label, x, 201, 18, h ? "#0b3a52" : "#ffffff", "center", "900");
+    uiBtn(b.x, b.y, b.w, b.h, null, () => { sel = tgt; SFX.select(); });
+  };
+  if (w < WORLDS - 1 && mapOk((w + 1) * WPL)) arrow(VW - 30, "▶", (w + 1) * WPL);
+  if (w > 0) arrow(30, "◀", (w - 1) * WPL);
   // the player walks on the map
   const hop = Math.abs(Math.sin(time * 6)) * 8;
   mascot(mapPos.x, mapPos.y - 70 - hop, outfitCol(PCOL[0]), 0.7, 1, true);
   // info panel
-  ctx.fillStyle = "rgba(0,0,0,0.45)"; rrect(14, 12, VW - 28, 62, 16); ctx.fill();
+  ctx.fillStyle = "rgba(0,0,0,0.45)"; rrect(122, 12, VW - 136, 62, 16); ctx.fill();
   txt("🌍 " + (w + 1) + ". " + th.name, VW - 30, 34, 22, th.top, "right", "900");
   const k = sel % WPL, best = save.best[sel];
   txt(lvlName(sel) + (k === 6 ? "  •  " + BOSSES[w].name : k === 7 ? "  •  مرحلة سرية" : ""), VW - 30, 58, 16, "#ffffff", "right", "800");
-  txt(MODE_NAME[gameMode], 30, 34, 16, "#ffe68a", "left", "800");
-  txt((best ? "⏱ " + fmtTime(best) + "   " : "") + "🪙 " + save.coins, 30, 58, 15, "#ffffff", "left", "700");
-  txt("⬅ ➡ تمشا   •   ⬆ ⬇ بدل العالم   •   A لعب   •   B رجوع", VW / 2, VH - 16, 14, "#ffffff", "center", "700", "rgba(0,0,0,0.6)");
+  txt(MODE_NAME[gameMode], 136, 34, 16, "#ffe68a", "left", "800");
+  txt((best ? "⏱ " + fmtTime(best) + "   " : "") + "🪙 " + save.coins, 136, 58, 15, "#ffffff", "left", "700");
+  txt("⬅ ➡ تمشا   •   ⬆ ⬇ بدل العالم   •   A لعب   •   B رجوع   •   🖱 كليكي على مرحلة", VW / 2, VH - 16, 14, "#ffffff", "center", "700", "rgba(0,0,0,0.6)");
+  drawBack();
 }
 function drawShop() {
   drawSky(THEMES[1], time * 15);
   ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.fillRect(0, 0, VW, VH);
   txt("🛒 الحانوت", VW / 2, 34, 32, "#ffffff", "center", "900", "rgba(0,0,0,0.5)");
+  drawBack();
   ctx.fillStyle = "rgba(0,0,0,0.4)"; rrect(VW - 130, 16, 116, 34, 12); ctx.fill(); coinIcon(VW - 110, 33); txt("" + save.coins, VW - 94, 34, 18, "#fff", "left", "800");
   const pv = Math.min(190, VW * 0.24);
   ctx.fillStyle = "rgba(255,255,255,0.12)"; rrect(16, 70, pv, 330, 18); ctx.fill();
@@ -1966,45 +2271,28 @@ function drawShop() {
   const owned = !!save.owned[tryIt[0]], worn = save[SHOP_KEY[shopRow]] === tryIt[0];
   mascot(16 + pv / 2, 180 - Math.abs(Math.sin(time * 3)) * 12, outfitCol(PCOL[0], tryOn.color), 1.6, Math.sin(time), tryOn);
   txt(tryIt[1], 16 + pv / 2, 316, 17, "#ffffff", "center", "900", "rgba(0,0,0,0.5)");
-  txt(worn ? "✓ لابسها" : owned ? "A باش تلبسها" : "👀 كتجربها • 🪙 " + tryIt[2], 16 + pv / 2, 346, 14, worn ? "#7dffa0" : owned ? "#ffffff" : "#ffe68a", "center", "800");
-  txt(worn || owned ? "" : "A باش تشريها", 16 + pv / 2, 372, 13, "#ffffff", "center", "700");
+  txt(worn ? "✓ لابسها" : owned ? "A ولا كليك باش تلبسها" : tryIt[2] < 0 ? "🏆 كتربحها من الإنجازات" : "👀 كتجربها • 🪙 " + tryIt[2], 16 + pv / 2, 346, 14, worn ? "#7dffa0" : owned ? "#ffffff" : "#ffe68a", "center", "800");
+  txt(worn || owned || tryIt[2] < 0 ? "" : "A ولا كليك باش تشريها", 16 + pv / 2, 372, 13, "#ffffff", "center", "700");
   const gx = 30 + pv, gw = VW - gx - 16;
   for (let r = 0; r < 3; r++) {
-    const items = SHOP[r], y0 = 70 + r * 112, cw = Math.min(96, (gw - 10) / Math.min(items.length, 8));
+    const items = SHOP[r], y0 = 70 + r * 112, cw = Math.min(96, (gw - 10) / items.length);
     txt(SHOP_TITLE[r], VW - 20, y0 + 10, 17, r === shopRow ? "#ffd23d" : "#ffffff", "right", "900", "rgba(0,0,0,0.5)");
     items.forEach((it, c) => {
       const x = gx + c * cw, y = y0 + 24, on = r === shopRow && c === shopCol[r], own = !!save.owned[it[0]], eq = save[SHOP_KEY[r]] === it[0];
       ctx.fillStyle = on ? "#ffffff" : eq ? "rgba(120,255,150,0.3)" : "rgba(255,255,255,0.15)"; rrect(x + 3, y, cw - 6, 82, 12); ctx.fill();
       if (on) { ctx.strokeStyle = "#ffd23d"; ctx.lineWidth = 3; rrect(x + 1, y - 2, cw - 2, 86, 13); ctx.stroke(); }
       const cx = x + cw / 2;
+      uiBtn(x + 3, y, cw - 6, 82, () => { if (shopRow !== r || shopCol[r] !== c) { shopRow = r; shopCol[r] = c; SFX.select(); } }, "confirm");
       if (r === 0) { mascot(cx, y + 30, PCOL[0], 0.42, 1); drawHat(it[0], cx, y + 30, 0.84); }
       else if (r === 1) { mascot(cx, y + 26, PCOL[0], 0.42, 0); drawGlasses(it[0], cx, y + 26 + 8.4, 0.8); }
-      else { const col = it[3] === "rainbow" ? { body: `hsl(${(time * 90) % 360},90%,62%)`, dark: `hsl(${(time * 90) % 360},70%,22%)`, hi: "#fff" } : it[3] || PCOL[0]; mascot(cx, y + 24, col, 0.42, 1); }
+      else mascot(cx, y + 24, outfitCol(PCOL[0], it[0]), 0.42, 1);
       txt(it[1], cx, y + 62, Math.min(12, cw / 7), on ? "#0b3a52" : "#ffffff", "center", "800");
       if (eq) txt("✓", x + cw - 14, y + 10, 14, "#2fb84a", "center", "900");
-      else if (!own) { txt("🪙" + it[2], cx, y + 76, 11, save.coins >= it[2] ? (on ? "#0b3a52" : "#ffe68a") : "#ff8a8a", "center", "800"); }
+      else if (!own) { const ex = it[2] < 0; txt(ex ? "🏆 إنجاز" : "🪙" + it[2], cx, y + 76, 11, ex ? (on ? "#a06a00" : "#ffd23d") : save.coins >= it[2] ? (on ? "#0b3a52" : "#ffe68a") : "#ff8a8a", "center", "800"); }
     });
   }
   if (shopMsgT > 0) { ctx.globalAlpha = clamp(shopMsgT, 0, 1); txt(shopMsg, VW / 2 + pv / 2, VH - 44, 18, "#ffffff", "center", "900", "rgba(0,0,0,0.7)"); ctx.globalAlpha = 1; }
   txt("⬆ ⬇ نوع  •  ⬅ ➡ اختار  •  A شري / لبس  •  B رجوع  •  الكوانات كتجمعهم فالمراحل 🪙", VW / 2, VH - 14, 13, "#ffffff", "center", "700", "rgba(0,0,0,0.6)");
-}
-function drawAch() {
-  drawSky(THEMES[3], time * 15);
-  ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.fillRect(0, 0, VW, VH);
-  const got = ACH.filter(a => save.ach[a[0]]).length;
-  txt("🏆 الإنجازات  " + got + " / " + ACH.length, VW / 2, 34, 28, "#ffffff", "center", "900", "rgba(0,0,0,0.5)");
-  const cols = 4, cw = Math.min(250, (VW - 30) / cols), ch = 92, x0 = VW / 2 - cols * cw / 2;
-  ACH.forEach((a, k) => {
-    const c = cols - 1 - (k % cols), r = Math.floor(k / cols), x = x0 + c * cw, y = 62 + r * (ch + 6), on = !!save.ach[a[0]];
-    ctx.fillStyle = on ? "rgba(255,255,255,0.92)" : "rgba(0,0,0,0.4)"; rrect(x + 4, y, cw - 8, ch, 14); ctx.fill();
-    ctx.globalAlpha = on ? 1 : 0.5;
-    txt(on ? a[1] : "🔒", x + cw - 34, y + ch / 2, 30, "#fff", "center");
-    txt(a[2], x + cw - 62, y + 30, 16, on ? "#0b3a52" : "#ffffff", "right", "900");
-    ctx.font = `700 12px "Segoe UI", Tahoma, sans-serif`;
-    txt(a[3], x + cw - 62, y + 58, 12, on ? "#3a5a6a" : "#cccccc", "right", "700");
-    ctx.globalAlpha = 1;
-  });
-  txt("B / Esc رجوع", VW / 2, VH - 14, 14, "#ffffff", "center", "700", "rgba(0,0,0,0.5)");
 }
 function pauseOpts() {
   const back = gameMode === "custom" ? "رجع للمحرر" : gameMode === "endless" ? "رجع للقائمة" : "رجع للخريطة";
@@ -2015,6 +2303,7 @@ function drawPause() {
   txt("⏸ متوقف", VW / 2, 120, 48, "#ffffff", "center", "900");
   pauseOpts().forEach((o, k) => {
     const y = 190 + k * 46, on = k === pauseSel;
+    uiBtn(VW / 2 - 140, y - 20, 280, 40, () => { if (pauseSel !== k) { pauseSel = k; SFX.select(); } }, "confirm");
     ctx.fillStyle = on ? "#ffffff" : "rgba(255,255,255,0.15)"; rrect(VW / 2 - 140, y - 20, 280, 40, 14); ctx.fill();
     txt(o, VW / 2, y, 20, on ? "#0b3a52" : "#ffffff", "center", "800");
   });
@@ -2038,36 +2327,9 @@ function drawComplete() {
   const lines = [["الوقت", fmtTime(r.time) + (r.newBest ? "  🏆" : "")], ["النقود", r.coins + (r.earned > r.coins ? "  (+" + (r.earned - r.coins) + " بونوس)" : "")], ["الموتات", "" + r.deaths]];
   if (!r.custom) lines.push(["فالبزطام", "🪙 " + save.coins]);
   lines.forEach((l, i) => { const y = y0 + 140 + i * 34; txt(l[0], VW / 2 + 20, y, 19, "#cfd8ff", "left", "700"); txt(l[1], VW / 2 - 20, y, 21, "#ffffff", "right", "800"); });
-  if (completeT > 1.4 && Math.floor(time * 2) % 2) {
-    const nx = r.custom ? null : nextAfter(L.i);
-    txt(r.custom ? "A: عاود   •   B: رجع للمحرر" : nx === "end" ? "A: كمّل" : nx === "map" ? "A: رجع للخريطة" : "A: المرحلة الجاية   •   B: الخريطة", VW / 2, y0 + 290, 20, "#ffffff", "center", "800");
-  }
-  ctx.globalAlpha = 1;
-}
-function drawRaceEnd() {
-  const r = raceResult, k = clamp(completeT * 2, 0, 1);
-  ctx.fillStyle = `rgba(0,0,0,${0.6 * k})`; ctx.fillRect(0, 0, VW, VH);
-  ctx.globalAlpha = k;
-  const w = r.winner;
-  txt(w.cpu ? "ربح الكومبيوتر 🤖🏆" : "ربح P" + (w.id + 1) + " 🏆", VW / 2, 70, 44, "#ffd23d", "center", "900", "rgba(0,0,0,0.5)");
-  txt("⏱ " + fmtTime(r.time), VW / 2, 116, 20, "#ffffff", "center", "800");
-  const n = r.order.length, cw = Math.min(170, (VW - 40) / n), podium = [150, 110, 80, 60];
-  r.order.forEach((p, i) => {
-    const x = VW / 2 + (i - (n - 1) / 2) * cw, base = 400, ph = podium[i];
-    ctx.fillStyle = ["#ffd23d", "#d8dde6", "#d9905a", "#8a8fa0"][i]; rrect(x - cw / 2 + 10, base - ph, cw - 20, ph, 10); ctx.fill();
-    txt("" + (i + 1), x, base - ph / 2, 36, "#0b2030", "center", "900");
-    mascot(x, base - ph - 62 - (i === 0 ? Math.abs(Math.sin(time * 5)) * 14 : 0), pcol(p), 0.9, 1, p.id === 0);
-    txt(p.cpu ? "🤖" : "P" + (p.id + 1), x, base - ph - 78, 16, "#ffffff", "center", "900", "rgba(0,0,0,0.6)");
-    txt("🪙 " + p.coins, x, base + 18, 14, "#ffe68a", "center", "800");
-  });
-  if (completeT > 1.2) {   // buttons, right to left: next level, race again, map
-    const opts = ["▶ المرحلة الجاية", "🔁 عاود السباق", "🗺️ الخريطة"], bw = Math.min(200, (VW - 40) / 3 - 10);
-    opts.forEach((o, i) => {
-      const x = VW / 2 + (1 - i) * (bw + 12), y = VH - 30, on = i === raceSel;
-      ctx.fillStyle = on ? "#ffffff" : "rgba(255,255,255,0.18)"; rrect(x - bw / 2, y - 19, bw, 38, 14); ctx.fill();
-      if (on) { ctx.strokeStyle = "#ffd23d"; ctx.lineWidth = 4; rrect(x - bw / 2 - 2, y - 21, bw + 4, 42, 15); ctx.stroke(); }
-      txt(o, x, y + 1, 17, on ? "#0b3a52" : "#ffffff", "center", "900");
-    });
+  if (completeT > 1.4) {
+    const o = completeOpts(); completeSel = Math.min(completeSel, o.length - 1);
+    drawBtnRow(o.map(x => x[0]), completeSel, y0 + 296, i => { if (completeSel !== i) { completeSel = i; SFX.select(); } });
   }
   ctx.globalAlpha = 1;
 }
@@ -2079,7 +2341,7 @@ function drawOver() {
   txt("📏 " + r.dist + " متر", VW / 2, 190, 40, "#ffd23d", "center", "900", "rgba(0,0,0,0.5)");
   txt(r.newBest ? "🏆 رقم قياسي جديد!" : "أحسن نتيجة: " + r.best + " متر", VW / 2, 240, 22, r.newBest ? "#7dffa0" : "#ffffff", "center", "800");
   txt("🪙 +" + r.coins, VW / 2, 284, 22, "#ffe68a", "center", "800");
-  if (completeT > 1 && Math.floor(time * 2) % 2) txt("A: عاود   •   B: القائمة", VW / 2, 370, 22, "#ffffff", "center", "800");
+  if (completeT > 1) drawBtnRow(["🔁 عاود", "🏠 القائمة"], overSel, 370, i => { if (overSel !== i) { overSel = i; SFX.select(); } });
   ctx.globalAlpha = 1;
 }
 function drawEnd() {
@@ -2089,17 +2351,19 @@ function drawEnd() {
   txt("جمعتي " + total + " من " + WORLDS * 18 + " 💎", VW / 2, 210, 28, "#ffffff", "center", "800", "rgba(0,0,0,0.5)");
   txt("غلبتي البوسات الخمسة! 👑 جرب المراحل السرية ⭐ والسباق 🏁", VW / 2, 260, 20, "#ffffff", "center", "700", "rgba(0,0,0,0.5)");
   mascot(VW / 2, 300 - Math.abs(Math.sin(time * 4)) * 20, outfitCol(PCOL[0]), 1, 1, true);
-  if (Math.floor(time * 2) % 2) txt("اضغط A باش ترجع للخريطة", VW / 2, 420, 22, "#ffffff", "center", "800", "rgba(0,0,0,0.5)");
+  drawBtnRow(["🗺️ رجع للخريطة"], 0, 420, () => {});
 }
 function drawToasts(dt) {
   if (!toasts.length) return;
   const t = toasts[0]; t.t -= dt;
   const k = clamp(Math.min(t.t, 3.5 - t.t) * 4, 0, 1), y = -40 + k * 64;
-  const w = 320; ctx.fillStyle = "rgba(20,20,40,0.92)"; rrect(VW / 2 - w / 2, y - 26, w, 52, 14); ctx.fill();
+  const w = 400; ctx.fillStyle = "rgba(20,20,40,0.92)"; rrect(VW / 2 - w / 2, y - 26, w, 52, 14); ctx.fill();
   ctx.strokeStyle = "#ffd23d"; ctx.lineWidth = 3; ctx.stroke();
   txt(t.a[1], VW / 2 + w / 2 - 30, y, 26, "#fff", "center");
   txt("🏆 إنجاز جديد: " + t.a[2], VW / 2 + w / 2 - 56, y - 9, 15, "#ffd23d", "right", "900");
   txt(t.a[3], VW / 2 + w / 2 - 56, y + 12, 12, "#ffffff", "right", "700");
+  txt("🪙 " + t.a[4],VW / 2 - w / 2 + 14, y - (t.a[5] ? 8 : 0), 16, "#ffe68a", "left", "900");
+  if (t.a[5]) txt("🎁 " + itemName(t.a[5]), VW / 2 - w / 2 + 14, y + 12, 11, "#7dffa0", "left", "800");
   if (t.t <= 0) toasts.shift();
 }
 
@@ -2147,7 +2411,7 @@ function drawEditor() {
   txt("🛠️ صانع المراحل  •  " + ED_TOOLS[ed.tool][1], VW - 20, 23, 16, "#ffffff", "right", "900");
   txt("A/Space حط • B/X مسح • Q E (LB RB) بدل • T جرب • Esc/Start القائمة • 🖱 كليك يمين = مسح", 20, 23, 12, "#ffe68a", "left", "700");
   // palette
-  const per = Math.ceil(ED_TOOLS.length / 2), pw = Math.min(54, (VW - 16) / per), px0 = VW / 2 - per * pw / 2, py0 = VH - ED_PAL_H, rh = ED_PAL_H / 2;
+  const per = Math.ceil(ED_TOOLS.length / 2), pw = Math.min(54, (VW - 76) / per), px0 = 60 + (VW - 60) / 2 - per * pw / 2, py0 = VH - ED_PAL_H, rh = ED_PAL_H / 2;
   ctx.fillStyle = "rgba(10,15,30,0.85)"; ctx.fillRect(0, py0, VW, ED_PAL_H);
   ED_TOOLS.forEach((t, i) => {
     const col = i % per, row = Math.floor(i / per), x = px0 + col * pw, y = py0 + row * rh, on = i === ed.tool;
@@ -2161,6 +2425,7 @@ function drawEditor() {
     txt("🛠️ القائمة", VW / 2, 120, 40, "#ffffff", "center", "900");
     edMenuOpts().forEach((o, k) => {
       const y = 190 + k * 50, on = k === ed.menuSel;
+      uiBtn(VW / 2 - 170, y - 21, 340, 42, () => { if (ed.menuSel !== k) { ed.menuSel = k; ed.confirmClear = false; SFX.select(); } }, "confirm");
       ctx.fillStyle = on ? "#ffffff" : "rgba(255,255,255,0.15)"; rrect(VW / 2 - 170, y - 21, 340, 42, 14); ctx.fill();
       txt(o, VW / 2, y, 20, on ? "#0b3a52" : "#ffffff", "center", "800");
     });
@@ -2243,7 +2508,7 @@ function drawLoading() {
   for (let k = 3; k >= 0; k--) {
     const x = head - k * 38 - 4, hop = Math.abs(Math.sin(loadT * 9 + k * 0.9)) * (loadReady ? 30 : 16);
     if (x < bx - 30) continue;
-    mascot(x, by - 50 - hop, k === 0 ? outfitCol(PCOL[0]) : PCOL[k], 0.62, 1, k === 0);
+    mascot(x, by - 50 - hop, outfitCol(PCOL[k], getOutfit(k).color), 0.62, 1, getOutfit(k));
   }
   txt(Math.floor(prog * 100) + "%", VW / 2, by + 42, 22, "#ffffff", "center", "900", "rgba(0,0,0,0.5)");
   for (const s of loadSparks) { ctx.globalAlpha = Math.min(1, s.life * 2); ctx.fillStyle = s.c; ctx.fillRect(s.x - 3, s.y - 3, 6, 6); }
@@ -2281,10 +2546,11 @@ function step_(dt) {
   time += dt;
   pollInput(dt);
   const edges = devEdges();
-  if (pressed.mute && state !== "editor") { musicOn = !musicOn; try { localStorage.setItem("hoppoMusic", musicOn ? "1" : "0"); } catch (e) {} }
+  if (pressed.mute && state !== "editor") setMusic(!musicOn);
 
   if (state === "loading") { updateLoading(dt); mouse.clicked = false; mouse.moved = false; return; }
   if (iris > 0) iris = Math.max(0, iris - dt * 1.6);
+  uiMouse();
   if (state === "title") {
     playSong(0);
     const old = titleSel;
@@ -2295,8 +2561,8 @@ function step_(dt) {
     if (old !== titleSel) SFX.select();
     if (pressed.confirm) {
       SFX.ok();
-      if (titleSel === 0) { gameMode = "story"; state = "count"; }
-      else if (titleSel === 1) { gameMode = "race"; playerCount = Math.max(2, playerCount); state = "count"; }
+      if (titleSel === 0) { gameMode = "story"; if (hasSave("story")) openSaveMenu(); else state = "count"; }
+      else if (titleSel === 1) { gameMode = "race"; playerCount = Math.max(2, playerCount); if (hasSave("race")) openSaveMenu(); else state = "count"; }
       else if (titleSel === 2) { gameMode = "endless"; state = "count"; }
       else if (titleSel === 3) openEditor();
       else if (titleSel === 4) openShop();
@@ -2311,16 +2577,12 @@ function step_(dt) {
     else if (edges.length || pressed.confirm) {
       SFX.ok();
       if (playerCount === 1) { team = ["any"]; afterJoin(); }
-      else { joinSlots = new Array(playerCount).fill(null); joinSlots[0] = edges[0] || "kb1"; state = "join"; }
+      else { joinSlots = new Array(playerCount).fill(null); joinSlots[0] = edges[0] || "kb1"; joinPrev = {}; state = "join"; }
     }
   } else if (state === "join") {
-    if (pressed.back) { state = "count"; }
-    else for (const d of edges) {
-      if (d === joinSlots[0]) { team = joinSlots.map(s => s || "cpu"); SFX.ok(); afterJoin(); break; }
-      if (joinSlots.includes(d)) continue;
-      const free = joinSlots.indexOf(null);
-      if (free >= 0) { joinSlots[free] = d; SFX.check(); }
-    }
+    updateJoin(edges);
+  } else if (state === "saveMenu") {
+    updateSaveMenu();
   } else if (state === "map") {
     updateMap(dt);
   } else if (state === "play") {
@@ -2334,27 +2596,21 @@ function step_(dt) {
       else if (pauseSel === 1) restartLevel();
       else if (pauseSel === 2) { if (gameMode === "custom") openEditor(); else if (gameMode === "endless") state = "title"; else { state = "map"; mapInit(); } }
       else if (pauseSel === 3) { state = "count"; playSong(0); }
-      else { musicOn = !musicOn; try { localStorage.setItem("hoppoMusic", musicOn ? "1" : "0"); } catch (e) {} }
+      else setMusic(!musicOn);
       SFX.ok();
     } else if (pressed.pause) state = "play";
   } else if (state === "complete") {
     completeT += dt; updateFx(dt);
     if (completeT > 1.4) {
-      if (lastResult.custom) { if (pressed.confirm || pressed.jump) startCustom(); else if (pressed.back) openEditor(); }
-      else {
-        const nx = nextAfter(L.i);
-        if (pressed.confirm || pressed.jump) {
-          if (nx === "end") state = "end";
-          else if (nx === "map") { state = "map"; mapInit(); }
-          else startLevel(nx);
-        } else if (pressed.back) { state = "map"; if (typeof nx === "number" && isUnlocked(nx)) sel = nx; mapInit(); }
-      }
+      const o = completeOpts();
+      completeSel = rowNav(Math.min(completeSel, o.length - 1), o.length);
+      if (pressed.confirm || pressed.jump) { SFX.ok(); o[completeSel][1](); }
+      else if (pressed.back) { if (lastResult.custom) openEditor(); else (o.find(x => x[0].startsWith("🗺️")) || o[0])[1](); }
     }
   } else if (state === "raceEnd") {
     completeT += dt; updateFx(dt);
     if (completeT > 1.2) {
-      if (rep("right")) { raceSel = Math.max(0, raceSel - 1); SFX.select(); }
-      if (rep("left")) { raceSel = Math.min(2, raceSel + 1); SFX.select(); }
+      raceSel = rowNav(raceSel, 3);
       if (pressed.confirm || pressed.jump) {
         SFX.ok();
         if (raceSel === 0) startLevel(nextRaceLevel(L.i));
@@ -2364,12 +2620,19 @@ function step_(dt) {
     }
   } else if (state === "over") {
     completeT += dt; updateFx(dt);
-    if (completeT > 1) { if (pressed.confirm || pressed.jump) startEndless(); else if (pressed.back) state = "title"; }
+    if (completeT > 1) {
+      overSel = rowNav(overSel, 2);
+      if (pressed.confirm || pressed.jump) { SFX.ok(); if (overSel === 0) startEndless(); else state = "title"; }
+      else if (pressed.back) state = "title";
+    }
   } else if (state === "end") {
     if (pressed.confirm || pressed.jump) { state = "map"; mapInit(); }
   } else if (state === "shop") {
     updateShop(dt);
   } else if (state === "ach") {
+    const pages = Math.ceil(ACH.length / ACH_PER);
+    if ((rep("left") || pressed.tabR) && achPage < pages - 1) { achPage++; SFX.select(); }
+    if ((rep("right") || pressed.tabL) && achPage > 0) { achPage--; SFX.select(); }
     if (pressed.back || pressed.confirm) state = "title";
   } else if (state === "editor") {
     updateEditor(dt);
@@ -2384,11 +2647,13 @@ function afterJoin() {
 function render(dt = 1 / 60) {
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = "#000"; ctx.fillRect(0, 0, cv.width, cv.height);
   ctx.setTransform(SC * DPR, 0, 0, SC * DPR, OX * SC * DPR, 0);
+  ui = [];
   ctx.save(); ctx.beginPath(); ctx.rect(0, 0, VW, VH); ctx.clip();
   if (state === "loading") drawLoading();
   else if (state === "title") drawTitle();
   else if (state === "count") drawCount();
   else if (state === "join") drawJoin();
+  else if (state === "saveMenu") drawSaveMenu();
   else if (state === "map") drawMap();
   else if (state === "shop") drawShop();
   else if (state === "ach") drawAch();
@@ -2405,6 +2670,7 @@ function render(dt = 1 / 60) {
   if (iris > 0) drawIris(1 - iris);
   drawToasts(dt);
   ctx.restore();
+  uiLast = ui;
 }
 requestAnimationFrame(frame);
 </script>
