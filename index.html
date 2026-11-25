@@ -339,6 +339,23 @@ function devEdges() {
   for (const d of list) { const j = devJoinBtn(d); if (j && !devPrev[d]) out.push(d); devPrev[d] = j; }
   return out;
 }
+// any key / button of a device (used to pick who plays with what)
+function devAny(d) {
+  const k = keys;
+  if (d === "kb1") return !!(k.KeyW || k.KeyA || k.KeyS || k.KeyD || k.Space || k.ShiftLeft || k.KeyF);
+  if (d === "kb2") return !!(k.ArrowUp || k.ArrowDown || k.ArrowLeft || k.ArrowRight || k.Enter || k.Numpad0 || k.ShiftRight);
+  const p = padByIndex(+d.slice(3)); if (!p) return false;
+  const [hx, hy] = hatDir(p);
+  return p.buttons.some(b => b.pressed) || Math.abs(p.axes[0] || 0) > 0.5 || Math.abs(p.axes[1] || 0) > 0.5 || !!hx || !!hy;
+}
+const anyPrev = {};
+function devAnyEdges() {
+  const list = ["kb1", "kb2"], ps = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (const p of ps) if (p && p.connected) list.push("pad" + p.index);
+  const out = [];
+  for (const d of list) { const a = devAny(d); if (a && !anyPrev[d]) out.push(d); anyPrev[d] = a; }
+  return out;
+}
 function devName(d) {
   if (d === "cpu") return "🤖 الكومبيوتر";
   if (d === "kb1") return "⌨ WASD + Space + Shift";
@@ -2062,70 +2079,103 @@ function rowNav(cur, n) {
 }
 
 // ---------------- per-player outfits (P1 = what is worn in the shop) ----------------
-let joinCat = [0, 0, 0, 0], joinPrev = {};
+let joinCat = [1, 1, 1, 1], joinPrev = {};
 function getOutfit(k) {
   if (!k) return save;
   if (!save.outfits[k]) save.outfits[k] = { hat: "none", glasses: "gnone", color: "cdef" };
   return save.outfits[k];
 }
+// join rows: 0 = controls (device), 1 = hat, 2 = glasses, 3 = colour
+const JOIN_ROWS = ["🎮", "🎩", "😎", "🎨"];
+let p1Pending = false;   // P1 came in with the mouse: the first device P1 touches becomes theirs
+function devShort(d) {
+  if (!d) return "🤖 بوت (الكومبيوتر)";
+  if (d === "kb1") return "⌨ WASD + Space";
+  if (d === "kb2") return "⌨ الأسهم + Enter";
+  return "🎮 مانيطة " + (+d.slice(3) + 1);
+}
+function deviceList() {
+  const list = ["kb1", "kb2"], ps = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (const p of ps) if (p && p.connected) list.push("pad" + p.index);
+  return list;
+}
+function cycleDevice(k, d) {
+  // devices already taken by another player are skipped; anyone except P1 can be a bot (null)
+  const opts = deviceList().filter(x => !joinSlots.some((s, j) => j !== k && s === x));
+  if (k > 0) opts.push(null);
+  if (opts.length < 2) { SFX.no(); return; }
+  const i = Math.max(0, opts.indexOf(joinSlots[k]));
+  joinSlots[k] = opts[(i + d + opts.length) % opts.length];
+  if (k === 0) p1Pending = false;
+  joinPrev = {}; SFX.select();
+}
 function cycleOutfit(k, d) {
-  const cat = joinCat[k], key = SHOP_KEY[cat], o = getOutfit(k), list = SHOP[cat].filter(it => save.owned[it[0]]);
+  if (joinCat[k] === 0) { cycleDevice(k, d); return; }
+  const cat = joinCat[k] - 1, key = SHOP_KEY[cat], o = getOutfit(k), list = SHOP[cat].filter(it => save.owned[it[0]]);
   if (list.length < 2) { SFX.no(); return; }
   const i = Math.max(0, list.findIndex(it => it[0] === o[key]));
   o[key] = list[(i + d + list.length) % list.length][0]; writeSave(); SFX.select();
 }
-function joinStart() { team = joinSlots.map(s => s || "cpu"); SFX.ok(); afterJoin(); }
-function updateJoin(edges) {
+function joinStart() { if (!joinSlots[0]) joinSlots[0] = "kb1"; p1Pending = false; team = joinSlots.map(s => s || "cpu"); SFX.ok(); afterJoin(); }
+function updateJoin(edges, anyEdges) {
   if (pressed.back) { state = "count"; return; }
-  for (let k = 0; k < joinSlots.length; k++) {   // each joined player picks their own look
+  const fresh = [];
+  for (const d of anyEdges) {   // any key / button of a free device: P1 takes it if waiting, otherwise it joins the next free spot
+    if (joinSlots.includes(d)) continue;
+    if (p1Pending) { joinSlots[0] = d; p1Pending = false; fresh.push(d); SFX.check(); continue; }
+    const free = joinSlots.indexOf(null);
+    if (free >= 0) { joinSlots[free] = d; fresh.push(d); SFX.check(); }
+  }
+  for (let k = 0; k < joinSlots.length; k++) {   // each player moves around their own card
     const d = joinSlots[k]; if (!d) continue;
     const i = devInput(d), pv = joinPrev[d] || { up: true, down: true, left: true, right: true };
-    if (i.up && !pv.up) { joinCat[k] = (joinCat[k] + 2) % 3; SFX.select(); }
-    if (i.down && !pv.down) { joinCat[k] = (joinCat[k] + 1) % 3; SFX.select(); }
+    if (i.up && !pv.up) { joinCat[k] = (joinCat[k] + 3) % 4; SFX.select(); }
+    if (i.down && !pv.down) { joinCat[k] = (joinCat[k] + 1) % 4; SFX.select(); }
     if (i.left && !pv.left) cycleOutfit(k, -1);
     if (i.right && !pv.right) cycleOutfit(k, 1);
     joinPrev[d] = { up: i.up, down: i.down, left: i.left, right: i.right };
   }
-  for (const d of edges) {
-    if (d === joinSlots[0]) { joinStart(); break; }
-    if (joinSlots.includes(d)) continue;
-    const free = joinSlots.indexOf(null);
-    if (free >= 0) { joinSlots[free] = d; SFX.check(); }
-  }
+  for (const d of edges) if (d === joinSlots[0] && !fresh.includes(d) && !p1Pending) { joinStart(); break; }
 }
 function drawJoin() {
   drawSky(THEMES[0], time * 20);
   ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(0, 0, VW, VH);
-  txt("دخلو اللاعبين واختارو اللبسة ديالكم", VW / 2, 42, 28, "#ffffff", "center", "900", "rgba(0,0,0,0.5)");
-  const n = playerCount, cw = Math.min(200, (VW - 30) / n), y = 204;
+  txt("دخلو اللاعبين واختارو باش غتلعبو واللبسة", VW / 2, 40, 28, "#ffffff", "center", "900", "rgba(0,0,0,0.5)");
+  const n = playerCount, cw = Math.min(210, (VW - 30) / n), y = 196;
   for (let k = 0; k < n; k++) {
-    const x = VW / 2 + (k - (n - 1) / 2) * cw, d = joinSlots[k], O = getOutfit(k), C = outfitCol(PCOL[k], O.color);
-    ctx.fillStyle = d ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.15)"; rrect(x - cw / 2 + 8, y - 124, cw - 16, 274, 18); ctx.fill();
-    ctx.strokeStyle = C.body; ctx.lineWidth = 4; rrect(x - cw / 2 + 8, y - 124, cw - 16, 274, 18); ctx.stroke();
-    txt("P" + (k + 1), x, y - 106, 20, d ? C.dark : C.body, "center", "900");
-    ctx.globalAlpha = d ? 1 : 0.6; mascot(x, y - 56, C, 0.85, Math.sin(time * 2 + k), O); ctx.globalAlpha = 1;
+    const x = VW / 2 + (k - (n - 1) / 2) * cw, d = joinSlots[k], human = !!d || (k === 0 && p1Pending), O = getOutfit(k), C = outfitCol(PCOL[k], O.color);
+    ctx.fillStyle = human ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.15)"; rrect(x - cw / 2 + 8, y - 124, cw - 16, 286, 18); ctx.fill();
+    ctx.strokeStyle = C.body; ctx.lineWidth = 4; rrect(x - cw / 2 + 8, y - 124, cw - 16, 286, 18); ctx.stroke();
+    txt("P" + (k + 1), x, y - 106, 20, human ? C.dark : C.body, "center", "900");
+    ctx.globalAlpha = human ? 1 : 0.6; mascot(x, y - 58, C, 0.85, Math.sin(time * 2 + k), O); ctx.globalAlpha = 1;
     const fs = Math.min(13, cw / 13);
-    txt(d ? devName(d) : "ضغط A باش تدخل • وإلا 🤖", x, y + 20, fs, d ? "#0b3a52" : "#ffe68a", "center", "800");
+    const hint = k === 0 && p1Pending ? "ضغط على WASD ولا الأسهم ولا المانيطة" : d ? "⬆ ⬇ اختار  •  ⬅ ➡ بدل" : "ضغط شي زر باش تدخل";
+    txt(hint, x, y + 14, Math.min(12, cw / 15), human ? "#3a5a6a" : "#ffe68a", "center", "800");
     const rw = cw - 30;
-    for (let r = 0; r < 3; r++) {
-      const ry = y + 52 + r * 30, on = joinCat[k] === r, it = SHOP[r].find(it => it[0] === O[SHOP_KEY[r]]) || SHOP[r][0];
-      ctx.fillStyle = on ? "#ffd23d" : d ? "rgba(11,58,82,0.12)" : "rgba(0,0,0,0.3)"; rrect(x - rw / 2, ry - 12, rw, 24, 10); ctx.fill();
-      const tc = on || d ? "#0b3a52" : "#ffffff";
-      txt(SHOP_TITLE[r].split(" ")[0] + " " + it[1], x, ry + 1, fs, tc, "center", "800");
+    for (let r = 0; r < 4; r++) {
+      const ry = y + 42 + r * 29, on = joinCat[k] === r;
+      let label;
+      if (r === 0) label = k === 0 && p1Pending ? "⌨ / 🎮 ؟" : devShort(d);
+      else { const it = SHOP[r - 1].find(it => it[0] === O[SHOP_KEY[r - 1]]) || SHOP[r - 1][0]; label = JOIN_ROWS[r] + " " + it[1]; }
+      ctx.fillStyle = on ? "#ffd23d" : human ? "rgba(11,58,82,0.12)" : "rgba(0,0,0,0.3)"; rrect(x - rw / 2, ry - 12, rw, 24, 10); ctx.fill();
+      if (r === 0 && !on) { ctx.strokeStyle = human ? "rgba(11,58,82,0.35)" : "rgba(255,255,255,0.35)"; ctx.lineWidth = 1.5; rrect(x - rw / 2, ry - 12, rw, 24, 10); ctx.stroke(); }
+      const tc = on || human ? "#0b3a52" : "#ffffff";
+      txt(label, x, ry + 1, fs, tc, "center", "800");
       txt("◀", x - rw / 2 + 11, ry + 1, 12, tc, "center", "900"); txt("▶", x + rw / 2 - 11, ry + 1, 12, tc, "center", "900");
       const pick = () => { if (joinCat[k] !== r) { joinCat[k] = r; SFX.select(); } };
-      uiBtn(x - rw / 2, ry - 12, 26, 24, pick, () => cycleOutfit(k, -1));
-      uiBtn(x + rw / 2 - 26, ry - 12, 26, 24, pick, () => cycleOutfit(k, 1));
-      uiBtn(x - rw / 2 + 26, ry - 12, rw - 52, 24, pick, () => cycleOutfit(k, 1));
+      const go = dd => () => { joinCat[k] = r; cycleOutfit(k, dd); };
+      uiBtn(x - rw / 2, ry - 12, 26, 24, pick, go(-1));
+      uiBtn(x + rw / 2 - 26, ry - 12, 26, 24, pick, go(1));
+      uiBtn(x - rw / 2 + 26, ry - 12, rw - 52, 24, pick, go(1));
     }
   }
-  const bw = 250, bx = VW / 2 - bw / 2, by = 366, hov = uiHit({ x: bx, y: by, w: bw, h: 42 }), pulse = Math.floor(time * 2) % 2;
-  ctx.fillStyle = hov ? "#ffffff" : pulse ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.75)"; rrect(bx, by, bw, 42, 16); ctx.fill();
-  ctx.strokeStyle = "#ffd23d"; ctx.lineWidth = 4; rrect(bx, by, bw, 42, 16); ctx.stroke();
-  txt("▶ يلاه نبداو", VW / 2, by + 22, 20, "#0b3a52", "center", "900");
-  uiBtn(bx, by, bw, 42, null, joinStart);
-  txt("P1: ضغط A مرة أخرى باش تبداو  •  ⬆ ⬇ اختار  •  ⬅ ➡ بدل اللبسة", VW / 2, 430, 14, "#ffffff", "center", "800", "rgba(0,0,0,0.6)");
-  txt("كل واحد كيختار من الحوايج اللي ربحتي ولا شريتي فالحانوت 🛒", VW / 2, VH - 18, 13, "#ffe68a", "center", "700", "rgba(0,0,0,0.6)");
+  const bw = 250, bx = VW / 2 - bw / 2, by = 376, hov = uiHit({ x: bx, y: by, w: bw, h: 40 }), pulse = Math.floor(time * 2) % 2;
+  ctx.fillStyle = hov ? "#ffffff" : pulse ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.75)"; rrect(bx, by, bw, 40, 16); ctx.fill();
+  ctx.strokeStyle = "#ffd23d"; ctx.lineWidth = 4; rrect(bx, by, bw, 40, 16); ctx.stroke();
+  txt("▶ يلاه نبداو", VW / 2, by + 21, 20, "#0b3a52", "center", "900");
+  uiBtn(bx, by, bw, 40, null, joinStart);
+  txt("P1: ضغط A (Space / Enter) باش تبداو  •  اللي ما دخلش كيلعب بلاصتو بوت 🤖", VW / 2, 436, 13, "#ffffff", "center", "800", "rgba(0,0,0,0.6)");
+  txt("كل واحد كيختار من الحوايج اللي ربحتي ولا شريتي فالحانوت 🛒", VW / 2, VH - 16, 12, "#ffe68a", "center", "700", "rgba(0,0,0,0.6)");
   drawBack();
 }
 
@@ -2668,7 +2718,7 @@ function step_(dt) {
   time += dt;
   if (state !== "play" && (touch.left || touch.right || touch.jump || touch.dash || touch.down)) touch.left = touch.right = touch.down = touch.jump = touch.dash = false;
   pollInput(dt);
-  const edges = devEdges();
+  const edges = devEdges(), anyEdges = devAnyEdges();
   if (pressed.mute && state !== "editor") setMusic(!musicOn);
 
   if (state === "loading") { updateLoading(dt); mouse.clicked = false; mouse.moved = false; return; }
@@ -2700,10 +2750,10 @@ function step_(dt) {
     else if (edges.length || pressed.confirm) {
       SFX.ok();
       if (playerCount === 1) { team = ["any"]; afterJoin(); }
-      else { joinSlots = new Array(playerCount).fill(null); joinSlots[0] = edges[0] || "kb1"; joinPrev = {}; state = "join"; }
+      else { joinSlots = new Array(playerCount).fill(null); joinSlots[0] = edges[0] || null; p1Pending = !edges[0]; joinCat = [0, 0, 0, 0]; joinPrev = {}; state = "join"; }
     }
   } else if (state === "join") {
-    updateJoin(edges);
+    updateJoin(edges, anyEdges);
   } else if (state === "saveMenu") {
     updateSaveMenu();
   } else if (state === "map") {
